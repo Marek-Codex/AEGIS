@@ -98,3 +98,4 @@ Assert-True ($LASTEXITCODE -eq 1) 'Unknown package did not produce fatal exit co
 Assert-True ($invalidOutput -match 'Unknown package ID') 'Unknown-package error is not actionable.'
 
 Write-Host 'All validation checks passed.' -ForegroundColor Green
+exit 0
