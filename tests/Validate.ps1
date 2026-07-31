@@ -69,6 +69,19 @@ foreach ($required in @(
     Assert-True ($listOutput -match [regex]::Escape($required)) "Manifest is missing $required."
 }
 
+Write-Host 'Checking irm | iex scope compatibility...'
+$iexProbe = @'
+$source = Get-Content -Raw -LiteralPath '__INSTALLER__'
+$source = $source.Replace('[switch]$Help,', '[switch]$Help = $true,')
+Invoke-Expression $source
+Write-Output "IEX_RETURNED=$LASTEXITCODE"
+'@.Replace('__INSTALLER__', $installer.Replace("'", "''"))
+$iexOutput = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -Command $iexProbe 2>&1 | Out-String
+Assert-True ($LASTEXITCODE -eq 0) "Invoke-Expression compatibility failed: $iexOutput"
+Assert-True ($iexOutput -match 'IEX_RETURNED=0') 'Invoke-Expression did not return to its caller.'
+Assert-True ($iexOutput -notmatch 'attribute cannot be added') 'A parameter collided with caller scope.'
+
 Write-Host 'Running non-destructive Modern dry run...'
 $dryRunOutput = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
     -File $installer -Profile Modern -IncludeGroup Utilities -DryRun -Unattended -NoColor 2>&1 |

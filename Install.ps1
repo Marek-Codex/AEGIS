@@ -15,8 +15,9 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Modern', 'Legacy', 'Full', 'Custom')]
-    [string]$Profile,
+    [Alias('Profile')]
+    [ValidateSet('Interactive', 'Modern', 'Legacy', 'Full', 'Custom')]
+    [string]$AegisProfile = 'Interactive',
 
     [ValidateSet(
         'Java', 'Utilities', 'Browsers', 'Launchers', 'Communication',
@@ -956,12 +957,12 @@ function Invoke-Aegis {
             return 0
         }
 
-        if (-not $Profile) {
+        if ($AegisProfile -eq 'Interactive') {
             if ($Unattended) {
-                $script:Profile = 'Modern'
+                $script:AegisProfile = 'Modern'
             }
             else {
-                $script:Profile = Read-MenuChoice -Prompt 'INSTALLATION PROFILE' `
+                $script:AegisProfile = Read-MenuChoice -Prompt 'INSTALLATION PROFILE' `
                     -Choices @('Modern', 'Legacy', 'Full', 'Custom') -Default 0
             }
         }
@@ -970,7 +971,7 @@ function Invoke-Aegis {
             $script:IncludeGroup = @(Read-OptionalGroups)
         }
 
-        $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $Profile `
+        $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $AegisProfile `
             -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
             -ExcludedPackages $ExcludePackage)
 
