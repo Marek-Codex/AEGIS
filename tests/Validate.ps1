@@ -88,6 +88,30 @@ Assert-True ($LASTEXITCODE -eq 0) "Invoke-Expression compatibility failed: $iexO
 Assert-True ($iexOutput -match 'IEX_RETURNED=0') 'Invoke-Expression did not return to its caller.'
 Assert-True ($iexOutput -notmatch 'attribute cannot be added') 'A parameter collided with caller scope.'
 
+Write-Host 'Checking Install.ps1 has no byte-order mark...'
+$installerBytes = [System.IO.File]::ReadAllBytes($installer)
+$hasBom = $installerBytes.Length -ge 3 -and $installerBytes[0] -eq 0xEF -and
+    $installerBytes[1] -eq 0xBB -and $installerBytes[2] -eq 0xBF
+Assert-True (-not $hasBom) ('Install.ps1 has a UTF-8 BOM. Invoke-Expression (irm | iex) reads the ' +
+    'raw fetched string, and a BOM there breaks [CmdletBinding()]/param() parsing -- this only ' +
+    'shows up over the network, never via -File, so it will not fail here otherwise.')
+
+Write-Host 'Checking the documented one-liner survives a stray leading BOM...'
+Assert-True ($readmeText -match [regex]::Escape('TrimStart([char]0xFEFF)')) `
+    'README one-liner lost its BOM-stripping guard against irm/proxy/cache-injected BOMs.'
+$bomProbe = @'
+$source = Get-Content -Raw -LiteralPath '__INSTALLER__'
+$source = $source.Replace('[switch]$Help,', '[switch]$Help = $true,')
+$source = [char]0xFEFF + $source
+$source = $source.TrimStart([char]0xFEFF)
+Invoke-Expression $source
+Write-Output "IEX_RETURNED=$LASTEXITCODE"
+'@.Replace('__INSTALLER__', $installer.Replace("'", "''"))
+$bomOutput = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -Command $bomProbe 2>&1 | Out-String
+Assert-True ($bomOutput -match 'IEX_RETURNED=0') `
+    "The one-liner's BOM-stripping guard did not survive a simulated leading BOM: $bomOutput"
+
 Write-Host 'Running non-destructive Modern dry run...'
 $dryRunOutput = & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
     -File $installer -Profile Modern -IncludeGroup Utilities -DryRun -Unattended -NoColor 2>&1 |

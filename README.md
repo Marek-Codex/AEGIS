@@ -50,8 +50,15 @@ Press `0` at any menu to go back a step or cancel.
 ### PowerShell one-liner
 
 ```powershell
-irm https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1 | iex
+irm https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1 |
+  % { $_.TrimStart([char]0xFEFF) } | iex
 ```
+
+The `TrimStart` strips a stray byte-order-mark character some HTTP clients
+and caches prepend to UTF-8 responses, which otherwise breaks
+`[CmdletBinding()]` parsing under `Invoke-Expression`. It is a no-op when
+there is no BOM, so the command works the same on Windows PowerShell 5.1 and
+PowerShell 7.
 
 Do not run remote scripts you have not inspected. Pin the URL to a release tag
 or commit SHA for reproducible deployments.
