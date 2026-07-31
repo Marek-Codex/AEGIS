@@ -48,6 +48,8 @@ Assert-True ($installerText -notmatch 'No available upgrade found') 'Localized W
 Assert-True ($installerText -match 'APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND') 'Installed-state exit code is missing.'
 Assert-True ($installerText -match 'Start-Process.+-Verb RunAs') 'DirectPlay elevation helper is missing.'
 Assert-True ($installerText -match '\$PID') 'Default log path is not process-unique.'
+Assert-True ($installerText -notmatch 'SetCursorPosition') `
+    'Interactive menus use fragile absolute cursor positioning.'
 Assert-True ($batchText -match 'AEGIS-%RANDOM%-%RANDOM%') 'BAT does not use a unique temporary path.'
 
 Write-Host 'Checking pinned GitHub Actions...'

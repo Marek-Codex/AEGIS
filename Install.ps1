@@ -363,14 +363,13 @@ function Read-MenuChoice {
 
     if ($useInteractiveKeys) {
         $position = $Default
-        $top = [Console]::CursorTop
-        $rowCount = $Choices.Count + 3
-        $width = [Math]::Max(29, [Console]::WindowWidth - 1)
 
         try {
             [Console]::CursorVisible = $false
             while ($true) {
-                [Console]::SetCursorPosition(0, $top)
+                [Console]::Clear()
+                Show-AegisHeader
+                $width = [Math]::Max(29, [Console]::WindowWidth - 1)
                 Write-Aegis $Prompt.PadRight($width) -Style Accent -SkipLog
                 for ($index = 0; $index -lt $Choices.Count; $index++) {
                     $prefix = if ($index -eq $position) { '  > ' } else { '    ' }
@@ -389,7 +388,8 @@ function Read-MenuChoice {
                     'DownArrow' { $position = ($position + 1) % $Choices.Count }
                     'S' { $position = ($position + 1) % $Choices.Count }
                     'Enter' {
-                        [Console]::SetCursorPosition(0, $top + $rowCount)
+                        [Console]::Clear()
+                        Show-AegisHeader
                         return $Choices[$position]
                     }
                 }
@@ -436,14 +436,13 @@ function Read-OptionalGroups {
     if ($useInteractiveKeys) {
         $position = 0
         $checked = New-Object 'bool[]' $groups.Count
-        $top = [Console]::CursorTop
-        $rowCount = $groups.Count + 4
-        $width = [Math]::Max(39, [Console]::WindowWidth - 1)
 
         try {
             [Console]::CursorVisible = $false
             while ($true) {
-                [Console]::SetCursorPosition(0, $top)
+                [Console]::Clear()
+                Show-AegisHeader
+                $width = [Math]::Max(39, [Console]::WindowWidth - 1)
                 $selectedCount = @($checked | Where-Object { $_ }).Count
                 Write-Aegis ('OPTIONAL GROUPS - {0} SELECTED' -f $selectedCount).PadRight($width) `
                     -Style Accent -SkipLog
@@ -480,7 +479,8 @@ function Read-OptionalGroups {
                         }
                     }
                     'Enter' {
-                        [Console]::SetCursorPosition(0, $top + $rowCount)
+                        [Console]::Clear()
+                        Show-AegisHeader
                         $selected = New-Object System.Collections.Generic.List[string]
                         for ($index = 0; $index -lt $groups.Count; $index++) {
                             if ($checked[$index]) {
