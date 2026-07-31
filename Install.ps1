@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 <#
 .SYNOPSIS
     AEGIS - Automated Essentials for Gaming Installation System.
@@ -162,7 +162,6 @@ SS    ;,. SS    ;,. SS    ;,. ;,. .,;   ;,.
             Write-Host $line
         }
     }
-    Write-Aegis '        [ イージス・プロトコル起動 ]' -Style Secondary -SkipLog
     Write-Aegis 'AUTOMATED ESSENTIALS FOR GAMING INSTALLATION SYSTEM' -Style Muted -SkipLog
     Write-Aegis ('VERSION {0}' -f $script:AegisVersion) -Style Secondary -SkipLog
     Write-Host ''
