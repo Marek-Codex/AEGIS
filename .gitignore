@@ -1,0 +1,7 @@
+*.log
+*.zip
+*.appx
+*.msix
+*.msixbundle
+.vscode/
+.idea/
