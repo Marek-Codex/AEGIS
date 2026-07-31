@@ -38,6 +38,10 @@ Assert-True ($installerText -match 'Automated Essentials for Gaming Installation
 Assert-True ($installerText -notmatch 'harryeffinpotter') 'Upstream owner leaked into implementation.'
 Assert-True ($batchText -match 'Marek-Codex/AEGIS') 'BAT publication URL is incorrect.'
 Assert-True ($readmeText -match 'Marek-Codex/AEGIS') 'README publication URL is incorrect.'
+Assert-True ($batchText -match 'github\.com/Marek-Codex/AEGIS/raw/refs/heads/main') `
+    'BAT does not use the fresh GitHub branch endpoint.'
+Assert-True ($readmeText -match 'github\.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install\.ps1') `
+    'README one-liner does not use the fresh GitHub branch endpoint.'
 Assert-True ($readmeText -match 'PC-Gaming-Redists') 'Conceptual inspiration credit is missing.'
 Assert-True ($readmeText -match 'clean-room implementation') 'Clean-room statement is missing.'
 Assert-True ($installerText -notmatch 'No available upgrade found') 'Localized WinGet parsing returned.'

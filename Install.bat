@@ -2,7 +2,7 @@
 setlocal
 
 set "AEGIS_SCRIPT=%~dp0Install.ps1"
-if not defined AEGIS_BASE_URL set "AEGIS_BASE_URL=https://raw.githubusercontent.com/Marek-Codex/AEGIS/main"
+if not defined AEGIS_BASE_URL set "AEGIS_BASE_URL=https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main"
 
 if exist "%AEGIS_SCRIPT%" goto run
 

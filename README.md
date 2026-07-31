@@ -43,7 +43,7 @@ flowchart LR
 ### PowerShell one-liner
 
 ```powershell
-irm https://raw.githubusercontent.com/Marek-Codex/AEGIS/main/Install.ps1 | iex
+irm https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1 | iex
 ```
 
 Do not run remote scripts you have not inspected. Pin the URL to a release tag
