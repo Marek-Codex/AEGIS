@@ -31,13 +31,19 @@ Pick a profile, inspect the plan, and let AEGIS handle the dependencies.
 ```mermaid
 flowchart LR
     entry([Launch AEGIS]) --> profile[Select profile]
-    profile --> plan[Review plan]
+    profile --> groups[Select optional groups]
+    groups --> plan[Review plan]
     plan --> winget{WinGet ready?}
     winget -->|Yes| install[Install selection]
     winget -->|No| bootstrap[Verified bootstrap]
     bootstrap --> install
-    install --> summary([Installation summary])
+    install --> summary([Summary + final log])
+    summary --> again{Run again?}
+    again -->|Main menu| profile
+    again -->|Exit| done([Done])
 ```
+
+Press `0` at any menu to go back a step or cancel.
 
 ## Run AEGIS
 
@@ -91,8 +97,10 @@ launchers can still depend on current components.
 
 Package names remain visible in the installation plan before any changes occur.
 Interactive runs support arrow keys or WASD, Space to toggle optional groups,
-and Enter to continue. Redirected and noninteractive terminals automatically
-fall back to numbered prompts.
+Enter to continue, and `0` to go back a step or cancel. Redirected and
+noninteractive terminals automatically fall back to numbered prompts, where
+`0` does the same. After a run finishes, choose to return to the main menu
+for another pass or exit.
 
 ## Examples
 
@@ -169,10 +177,11 @@ to see the complete current list.
 - Downloaded WinGet packages are signature-checked.
 - Exact package IDs and the official WinGet source are used.
 - Each package is retried independently.
-- Logs are written to `%TEMP%` unless `-LogPath` is supplied.
+- Logs are written to `%TEMP%` unless `-LogPath` is supplied, and the full log
+  is also printed to the console at the end of a run (or on a fatal error).
 - A nonzero exit code is returned for fatal or partial failures.
-- DirectPlay requests elevation only when it needs to be enabled. Unattended
-  runs must already be elevated.
+- DirectPlay requests elevation via a UAC prompt when the shell isn't already
+  elevated. Unattended runs must already be elevated.
 - A restart is never initiated automatically.
 - Installed/current package state is determined from WinGet exit codes rather
   than localized output text.
@@ -191,7 +200,6 @@ to see the complete current list.
 ```text
 Install.bat        Standalone bootstrap and local-script entry point
 Install.ps1        UI, profiles, manifest, WinGet bootstrap, and install engine
-AEGIS.txt          Source artwork
 tests/             Non-destructive validation
 .github/workflows  Windows PowerShell, PowerShell 7, and release automation
 ```

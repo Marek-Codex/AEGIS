@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
     AEGIS - Automated Essentials for Gaming Installation System.
@@ -162,6 +162,7 @@ SS    ;,. SS    ;,. SS    ;,. ;,. .,;   ;,.
             Write-Host $line
         }
     }
+    Write-Aegis '        [ イージス・プロトコル起動 ]' -Style Secondary -SkipLog
     Write-Aegis 'AUTOMATED ESSENTIALS FOR GAMING INSTALLATION SYSTEM' -Style Muted -SkipLog
     Write-Aegis ('VERSION {0}' -f $script:AegisVersion) -Style Secondary -SkipLog
     Write-Host ''
@@ -377,7 +378,7 @@ function Read-MenuChoice {
                     Write-Aegis (($prefix + $Choices[$index]).PadRight($width)) `
                         -Style $style -SkipLog
                 }
-                Write-Aegis '  Arrows/WASD: move  Enter: select'.PadRight($width) `
+                Write-Aegis '  Arrows/WASD: move  Enter: select  0: cancel'.PadRight($width) `
                     -Style Muted -SkipLog
                 Write-Aegis ''.PadRight($width) -SkipLog
 
@@ -392,6 +393,20 @@ function Read-MenuChoice {
                         Show-AegisHeader
                         return $Choices[$position]
                     }
+                    'D0' {
+                        [Console]::Clear()
+                        Show-AegisHeader
+                        return $null
+                    }
+                    'NumPad0' {
+                        [Console]::Clear()
+                        Show-AegisHeader
+                        return $null
+                    }
+                    default {
+                        Write-Aegis '  Unrecognized key.'.PadRight($width) -Style Warning -SkipLog
+                        Start-Sleep -Milliseconds 500
+                    }
                 }
             }
         }
@@ -405,10 +420,15 @@ function Read-MenuChoice {
         $marker = if ($index -eq $Default) { '*' } else { ' ' }
         Write-Aegis ('  [{0}] {1} {2}' -f ($index + 1), $marker, $Choices[$index]) -Style Normal
     }
+    Write-Aegis '  [0]   Cancel' -Style Normal
     while ($true) {
         $answer = Read-Host ('Select [{0}]' -f ($Default + 1))
         if ([string]::IsNullOrWhiteSpace($answer)) {
             return $Choices[$Default]
+        }
+
+        if ($answer.Trim() -eq '0') {
+            return $null
         }
 
         $number = 0
@@ -457,7 +477,7 @@ function Read-OptionalGroups {
 
                 Write-Aegis '  Arrows/WASD: move  Space: toggle'.PadRight($width) `
                     -Style Muted -SkipLog
-                Write-Aegis '  A: all  N: none  Enter: continue'.PadRight($width) `
+                Write-Aegis '  A: all  N: none  Enter: continue  0: back'.PadRight($width) `
                     -Style Muted -SkipLog
                 Write-Aegis ''.PadRight($width) -SkipLog
 
@@ -487,7 +507,21 @@ function Read-OptionalGroups {
                                 $selected.Add($groups[$index])
                             }
                         }
-                        return $selected.ToArray()
+                        return ,$selected.ToArray()
+                    }
+                    'D0' {
+                        [Console]::Clear()
+                        Show-AegisHeader
+                        return $null
+                    }
+                    'NumPad0' {
+                        [Console]::Clear()
+                        Show-AegisHeader
+                        return $null
+                    }
+                    default {
+                        Write-Aegis '  Unrecognized key.'.PadRight($width) -Style Warning -SkipLog
+                        Start-Sleep -Milliseconds 500
                     }
                 }
             }
@@ -501,11 +535,16 @@ function Read-OptionalGroups {
     for ($index = 0; $index -lt $groups.Count; $index++) {
         Write-Aegis ('  [{0}] {1}' -f ($index + 1), $groups[$index])
     }
-    Write-Aegis 'Enter comma-separated numbers, or press Enter for none.' -Style Muted
+    Write-Aegis '  [0] Back to profile selection' -Style Normal
+    Write-Aegis 'Enter comma-separated numbers, 0 to go back, or press Enter for none.' -Style Muted
     $answer = Read-Host 'Select'
 
     if ([string]::IsNullOrWhiteSpace($answer)) {
-        return @()
+        return ,@()
+    }
+
+    if ($answer.Trim() -eq '0') {
+        return $null
     }
 
     $selected = New-Object System.Collections.Generic.List[string]
@@ -519,7 +558,7 @@ function Read-OptionalGroups {
             $selected.Add($groups[$number - 1])
         }
     }
-    return $selected.ToArray()
+    return ,$selected.ToArray()
 }
 
 function Test-WinGet {
@@ -806,7 +845,9 @@ function Install-WinGetPackage {
             return
         }
 
-        if ($exitCode -eq 0) {
+        if ($exitCode -eq 0 -or $exitCode -eq 3010) {
+            # 3010 is ERROR_SUCCESS_REBOOT_REQUIRED: the install succeeded but needs a restart.
+            $script:RebootRequired = $script:RebootRequired -or ($exitCode -eq 3010)
             Write-Aegis ('  DONE  {0}' -f $Package.Name) -Style Success
             Add-AegisResult -Package $Package -Status Installed -ExitCode $exitCode
             return
@@ -842,24 +883,20 @@ function Install-WindowsFeaturePackage {
     }
 
     try {
-        $feature = Get-WindowsOptionalFeature -Online -FeatureName $Package.FeatureName
-        if ($feature.State -eq 'Enabled') {
-            Write-Aegis ('  CURRENT  {0}' -f $Package.Name) -Style Muted
-            Add-AegisResult -Package $Package -Status Current
-            return
-        }
-
+        # Get-WindowsOptionalFeature -Online itself requires elevation (it throws
+        # "The requested operation requires elevation" even just to query state),
+        # so admin status must be checked before touching it, not after.
         if (-not (Test-IsAdministrator)) {
             if ($Unattended) {
-                throw 'DirectPlay requires an elevated shell during unattended installation.'
+                throw ('{0} requires an elevated (Run as Administrator) shell during unattended installation.' -f $Package.Name)
             }
 
-            Write-Aegis '  DirectPlay requires elevation. Approve the UAC prompt.' -Style Warning
+            Write-Aegis ('  {0} requires elevation. Approve the UAC prompt.' -f $Package.Name) -Style Warning
             $dismPath = Join-Path $env:SystemRoot 'System32\dism.exe'
             $process = Start-Process -FilePath $dismPath -Verb RunAs -Wait -PassThru `
                 -ArgumentList @(
                     '/Online',
-                    ('/Enable-Feature'),
+                    '/Enable-Feature',
                     ('/FeatureName:{0}' -f $Package.FeatureName),
                     '/All',
                     '/NoRestart'
@@ -874,6 +911,13 @@ function Install-WindowsFeaturePackage {
 
             Write-Aegis ('  DONE  {0}' -f $Package.Name) -Style Success
             Add-AegisResult -Package $Package -Status Installed
+            return
+        }
+
+        $feature = Get-WindowsOptionalFeature -Online -FeatureName $Package.FeatureName
+        if ($feature.State -eq 'Enabled') {
+            Write-Aegis ('  CURRENT  {0}' -f $Package.Name) -Style Muted
+            Add-AegisResult -Package $Package -Status Current
             return
         }
 
@@ -932,6 +976,25 @@ function Show-Summary {
     Write-Aegis ('Log: {0}' -f $script:LogPath) -Style Muted
 }
 
+function Show-FinalLog {
+    if (-not (Test-Path -LiteralPath $script:LogPath)) {
+        return
+    }
+
+    $lines = @(Get-Content -LiteralPath $script:LogPath)
+    $maxLines = 300
+    $shown = if ($lines.Count -gt $maxLines) { $lines[($lines.Count - $maxLines)..($lines.Count - 1)] } else { $lines }
+
+    Write-Host ''
+    Write-Aegis ('FINAL INSTALL LOG ({0})' -f $script:LogPath) -Style Accent -SkipLog
+    if ($lines.Count -gt $maxLines) {
+        Write-Aegis ('  ...showing last {0} of {1} lines...' -f $maxLines, $lines.Count) -Style Muted -SkipLog
+    }
+    foreach ($line in $shown) {
+        Write-Aegis ('  {0}' -f $line) -Style Muted -SkipLog
+    }
+}
+
 function Invoke-Aegis {
     try {
         if ($Help) {
@@ -957,73 +1020,122 @@ function Invoke-Aegis {
             return 0
         }
 
-        if ($AegisProfile -eq 'Interactive') {
+        if ($AegisProfile -eq 'Interactive' -and $Unattended) {
+            $script:AegisProfile = 'Modern'
+        }
+
+        $sessionHadFailure = $false
+
+        while ($true) {
+            $explicitGroups = $IncludeGroup.Count -gt 0
+            $selected = @()
+
+            if (-not $Unattended -and ($AegisProfile -eq 'Interactive' -or -not $explicitGroups)) {
+                while ($true) {
+                    if ($AegisProfile -eq 'Interactive') {
+                        $chosenProfile = Read-MenuChoice -Prompt 'INSTALLATION PROFILE' `
+                            -Choices @('Modern', 'Legacy', 'Full', 'Custom') -Default 0
+                        if ($null -eq $chosenProfile) {
+                            Write-Aegis 'Cancelled.' -Style Warning
+                            return 0
+                        }
+                        $script:AegisProfile = $chosenProfile
+                    }
+
+                    if (-not $explicitGroups) {
+                        $chosenGroups = Read-OptionalGroups
+                        if ($null -eq $chosenGroups) {
+                            $script:AegisProfile = 'Interactive'
+                            continue
+                        }
+                        $script:IncludeGroup = @($chosenGroups)
+                    }
+
+                    $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $AegisProfile `
+                        -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
+                        -ExcludedPackages $ExcludePackage)
+
+                    if ($selected.Count -gt 0 -or $AegisProfile -ne 'Custom' -or $IncludePackage.Count -gt 0) {
+                        break
+                    }
+
+                    Write-Aegis 'Custom needs at least one optional group selected (Space to toggle). Choose again.' `
+                        -Style Warning
+                }
+            }
+            else {
+                $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $AegisProfile `
+                    -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
+                    -ExcludedPackages $ExcludePackage)
+            }
+
+            if ($selected.Count -eq 0) {
+                throw 'No packages were selected. Custom profile requires -IncludeGroup and/or -IncludePackage.'
+            }
+
+            Show-InstallationPlan -Packages $selected
+
+            if (-not $Unattended -and -not $DryRun) {
+                $confirmation = Read-Host 'Continue? [Y/n]'
+                if ($confirmation -match '^[Nn]') {
+                    Write-Aegis 'Cancelled.' -Style Warning
+                    return 0
+                }
+            }
+
+            if ($DryRun) {
+                Write-Aegis 'Dry run: no system changes will be made.' -Style Warning
+            }
+            else {
+                Ensure-WinGet -Channel $WinGetChannel -SkipUpdate:$SkipWinGetUpdate
+            }
+
+            $currentCategory = ''
+            foreach ($package in $selected) {
+                if ($package.Category -ne $currentCategory) {
+                    $currentCategory = $package.Category
+                    Write-Host ''
+                    Write-Aegis $currentCategory.ToUpperInvariant() -Style Secondary
+                }
+
+                if ($package.Kind -eq 'WindowsFeature') {
+                    Install-WindowsFeaturePackage -Package $package
+                }
+                else {
+                    Install-WinGetPackage -Package $package -ForceInstall:$Force -Attempts $RetryCount
+                }
+            }
+
+            Show-Summary
+            $failureCount = @($script:Results | Where-Object { $_.Status -eq 'Failed' }).Count
+            if ($failureCount -gt 0) {
+                $sessionHadFailure = $true
+            }
+
             if ($Unattended) {
-                $script:AegisProfile = 'Modern'
-            }
-            else {
-                $script:AegisProfile = Read-MenuChoice -Prompt 'INSTALLATION PROFILE' `
-                    -Choices @('Modern', 'Legacy', 'Full', 'Custom') -Default 0
-            }
-        }
-
-        if (-not $Unattended -and $IncludeGroup.Count -eq 0) {
-            $script:IncludeGroup = @(Read-OptionalGroups)
-        }
-
-        $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $AegisProfile `
-            -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
-            -ExcludedPackages $ExcludePackage)
-
-        if ($selected.Count -eq 0) {
-            throw 'No packages were selected.'
-        }
-
-        Show-InstallationPlan -Packages $selected
-
-        if (-not $Unattended -and -not $DryRun) {
-            $confirmation = Read-Host 'Continue? [Y/n]'
-            if ($confirmation -match '^[Nn]') {
-                Write-Aegis 'Cancelled.' -Style Warning
-                return 0
-            }
-        }
-
-        if ($DryRun) {
-            Write-Aegis 'Dry run: no system changes will be made.' -Style Warning
-        }
-        else {
-            Ensure-WinGet -Channel $WinGetChannel -SkipUpdate:$SkipWinGetUpdate
-        }
-
-        $currentCategory = ''
-        foreach ($package in $selected) {
-            if ($package.Category -ne $currentCategory) {
-                $currentCategory = $package.Category
-                Write-Host ''
-                Write-Aegis $currentCategory.ToUpperInvariant() -Style Secondary
+                Show-FinalLog
+                return $(if ($failureCount -gt 0) { 2 } else { 0 })
             }
 
-            if ($package.Kind -eq 'WindowsFeature') {
-                Install-WindowsFeaturePackage -Package $package
+            Write-Host ''
+            $nextAction = Read-MenuChoice -Prompt 'RUN COMPLETE' -Choices @('Exit', 'Main menu') -Default 0
+            if ($nextAction -ne 'Main menu') {
+                Show-FinalLog
+                return $(if ($sessionHadFailure) { 2 } else { 0 })
             }
-            else {
-                Install-WinGetPackage -Package $package -ForceInstall:$Force -Attempts $RetryCount
-            }
-        }
 
-        Show-Summary
-        $failureCount = @($script:Results | Where-Object { $_.Status -eq 'Failed' }).Count
-        if ($failureCount -gt 0) {
-            return 2
+            $script:Results = New-Object System.Collections.Generic.List[object]
+            $script:RebootRequired = $false
+            $script:AegisProfile = 'Interactive'
+            $script:IncludeGroup = @()
         }
-        return 0
     }
     catch {
         try {
             Write-Aegis ('FATAL  {0}' -f $_.Exception.Message) -Style Failure
             Write-AegisLog -Message $_.ScriptStackTrace -Level ERROR
             Write-Aegis ('Log: {0}' -f $script:LogPath) -Style Muted
+            Show-FinalLog
         }
         catch {
             Write-Error $_

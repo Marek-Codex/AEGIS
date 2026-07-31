@@ -27,7 +27,7 @@ jobs:
           $version = '${{ github.ref_name }}'
           $stage = Join-Path $env:RUNNER_TEMP "AEGIS-$version"
           New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item Install.ps1, Install.bat, AEGIS.txt, README.md, LICENSE -Destination $stage
+          Copy-Item Install.ps1, Install.bat, README.md, LICENSE -Destination $stage
           Compress-Archive -Path $stage -DestinationPath "AEGIS-$version.zip"
           Get-FileHash "AEGIS-$version.zip" -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  AEGIS-$version.zip" } |
