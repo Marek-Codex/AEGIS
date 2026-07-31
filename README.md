@@ -4,11 +4,12 @@
 
 **One command. Every runtime. Game ready.**
 
+![README visits](https://count.getloli.com/@marek-codex.aegis?theme=booru-lewd)
+
 [![Validation](https://github.com/Marek-Codex/AEGIS/actions/workflows/validate.yml/badge.svg)](https://github.com/Marek-Codex/AEGIS/actions/workflows/validate.yml)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-3CA0FF?style=flat-square&logo=windows&logoColor=white)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-07111C?style=flat-square&logo=powershell&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-A03CFF?style=flat-square)
-![README visits](https://count.getloli.com/@marek-codex.aegis?theme=booru-lewd)
 
 **Automated Essentials for Gaming Installation System**
 
