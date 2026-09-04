@@ -15,184 +15,133 @@
 
 </div>
 
-AEGIS prepares Windows gaming systems with curated runtimes, compatibility
-components, and optional applications. It uses explicit package identifiers,
-checks installed state through WinGet, supports modern and legacy profiles, and
-provides repeatable unattended installation.
+AEGIS installs the complete curated prerequisite stack for Windows gaming:
+Visual C++ redistributables, .NET Desktop and ASP.NET Core runtimes, legacy
+gaming components, and a few deliberate essentials. It is built for a clean
+Windows installation but is safe to run again later.
 
-No debloat rituals. No registry folklore. No suspicious "400% FPS" power plan.
-Pick a profile, inspect the plan, and let AEGIS handle the dependencies.
+No debloat rituals, registry folklore, launchers, browsers, chat clients, or
+monitoring suites. Choose the recommended installation or customize the
+runtime categories before anything changes. An optional Power User Workbench
+is kept separate from the prerequisite baseline.
 
 > AEGIS is under active development. Review the installation plan before using
 > it on a production system.
 
-## How it works
-
-```mermaid
-flowchart LR
-    entry([Launch AEGIS]) --> profile[Select profile]
-    profile --> groups[Select optional groups]
-    groups --> plan[Review plan]
-    plan --> winget{WinGet ready?}
-    winget -->|Yes| install[Install selection]
-    winget -->|No| bootstrap[Verified bootstrap]
-    bootstrap --> install
-    install --> summary([Summary + final log])
-    summary --> again{Run again?}
-    again -->|Main menu| profile
-    again -->|Exit| done([Done])
-```
-
-Press `0` at any menu to go back a step or cancel.
-
 ## Run AEGIS
 
-### PowerShell one-liner
+Open Windows PowerShell and run:
 
 ```powershell
 irm https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1 |
   % { $_.TrimStart([char]0xFEFF) } | iex
 ```
 
-The `TrimStart` strips a stray byte-order-mark character some HTTP clients
-and caches prepend to UTF-8 responses, which otherwise breaks
-`[CmdletBinding()]` parsing under `Invoke-Expression`. It is a no-op when
-there is no BOM, so the command works the same on Windows PowerShell 5.1 and
-PowerShell 7.
+The `TrimStart` guard makes the command tolerant of a stray UTF-8 byte-order
+mark introduced by an HTTP client, proxy, or cache. Do not run remote scripts
+you have not inspected. Pin the URL to a release tag or commit SHA for
+reproducible deployments.
 
-Do not run remote scripts you have not inspected. Pin the URL to a release tag
-or commit SHA for reproducible deployments.
-
-### Downloadable BAT
-
-Download and run [`Install.bat`](Install.bat). It works as a standalone
-bootstrapper:
-
-1. If `Install.ps1` is beside the BAT, it runs that local copy.
-2. Otherwise, it downloads the current `Install.ps1` from the AEGIS repository
-   into `%TEMP%` and runs it.
-
-### Direct PowerShell
+Alternatively, download and run [`Install.bat`](Install.bat), or run the
+PowerShell file directly:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\Install.ps1
 ```
 
-## Profiles
+## What the recommended installation includes
 
-| Profile | Selection |
-|---|---|
-| `Modern` | Current gaming runtimes |
-| `Legacy` | Modern baseline plus legacy compatibility runtimes |
-| `Full` | Every curated runtime and compatibility component |
-| `Custom` | Only explicitly selected packages and groups |
+### Visual C++
 
-Legacy and Full intentionally include the Modern baseline. Older games and
-launchers can still depend on current components.
+- Microsoft Visual C++ 2005, 2008, 2010, 2012, 2013, and current v14
+- Both x86 and x64 on x64 Windows because 32-bit games still require x86
+- Native Arm64 v14 support on Arm64 Windows
 
-## Optional groups
+### .NET Desktop
 
-- Java
-- Utilities
-- Browsers
-- Launchers
-- Communication
-- Capture
-- Monitoring
-- Modding
+- Every non-preview Windows Desktop runtime family currently published in
+  WinGet: 3.1, 5, 6, 7, 8, 9, and 10
+- Available x86 variants are included alongside native 64-bit variants
 
-Package names remain visible in the installation plan before any changes occur.
-Interactive runs support arrow keys or WASD, Space to toggle optional groups,
-Enter to continue, and `0` to go back a step or cancel. Redirected and
-noninteractive terminals automatically fall back to numbered prompts, where
-`0` does the same. After a run finishes, choose to return to the main menu
-for another pass or exit.
+### ASP.NET Core
 
-## Examples
+- Runtime packages for 2.1, 3.1, 5, 6, 7, 8, 9, and 10
+- Old similarly named packages that WinGet identifies as SDKs are excluded
 
-```powershell
-# Preview without changing the system
-.\Install.ps1 -Profile Full -IncludeGroup Utilities,Java -DryRun
+### Gaming compatibility
 
-# Modern runtimes and utilities
-.\Install.ps1 -Profile Modern -IncludeGroup Utilities
-
-# Full unattended runtime installation using the newest published WinGet build
-.\Install.ps1 -Profile Full -WinGetChannel Newest -Unattended
-
-# Install selected items only
-.\Install.ps1 -Profile Custom `
-  -IncludePackage M2Team.NanaZip,Devolutions.UniGetUI
-```
-
-## WinGet channels
-
-| Channel | Behavior |
-|---|---|
-| `Stable` | GitHub's designated latest stable release |
-| `Preview` | Most recently published prerelease |
-| `Newest` | Most recently published release, stable or prerelease |
-
-When an update is needed, AEGIS downloads the matching Desktop App Installer
-bundle and dependency archive from the official
-[`microsoft/winget-cli`](https://github.com/microsoft/winget-cli) release. The
-bundle and extracted AppX dependencies must have valid Microsoft signatures
-before AEGIS installs them.
-
-Use `-SkipWinGetUpdate` to retain a working installed version.
-
-## Included selections
-
-### Modern
-
-- Microsoft Visual C++ v14 Redistributable
-- Microsoft .NET Desktop Runtime 8
-- Microsoft .NET Desktop Runtime 10
 - DirectX End-User Runtime
+- Microsoft XNA Framework Redistributable
 - OpenAL
 - Microsoft Edge WebView2 Runtime
+- NVIDIA PhysX and PhysX Legacy
+- DirectPlay Windows feature
 
-### Legacy compatibility
+### Essentials
 
-- Microsoft Visual C++ 2005–2013 Redistributables
-- Microsoft .NET Desktop Runtime 3.1, 5, 6, and 7
-- Microsoft XNA Framework Redistributable
-- NVIDIA PhysX
-- NVIDIA PhysX Legacy
-- DirectPlay
+- NanaZip, replacing 7-Zip
+- Current PowerShell, supplementing the inbox Windows PowerShell 5.1
 
-### Requested optional applications
+Amazon Corretto 25 JDK is included in the recommended stack and can be disabled
+through Customize.
 
-- Amazon Corretto 25 JDK
-- NanaZip
-- UniGetUI
-- Brave Beta
+## How it works
 
-The manifest also contains optional launchers, communication, capture,
-monitoring, and modding applications. Run:
+```text
+Launch AEGIS
+  -> Install recommended / Customize / Exit
+  -> Review the exact installation plan
+  -> Repair or update WinGet when needed
+  -> Install each selected prerequisite independently
+  -> Show a complete result summary and save the full log
+```
+
+The recommended path installs everything above. Customize exposes seven broad
+components: `VC++`, `DotNet`, `AspNet`, `Gaming`, `Essentials`, `Java`, and
+`Workbench`.
+
+The optional Workbench installs UniGetUI, Everything Beta, VLC Nightly, Xtreme
+Download Manager from the Microsoft Store, Sublime Text 4, and Visual Studio
+Code Insiders, plus WizTree. Prerelease applications are labeled clearly and
+are never part of Recommended.
+
+## Automation and previews
 
 ```powershell
+# Preview the recommended stack without changing Windows
+.\Install.ps1 -Profile Recommended -DryRun -Unattended
+
+# Install the recommended stack non-interactively (elevate the shell first)
+.\Install.ps1 -Profile Recommended -Unattended
+
+# Install selected components only
+.\Install.ps1 -Profile Custom -IncludeGroup VC++,DotNet,AspNet -Unattended
+
+# Install the optional Power User Workbench
+.\Install.ps1 -Profile Custom -IncludeGroup Workbench -Unattended
+
+# List every package in the manifest
 .\Install.ps1 -ListPackages
 ```
 
-to see the complete current list.
+The former `Modern`, `Legacy`, and `Full` profile names remain accepted as
+compatibility aliases for `Recommended`.
 
 ## Safety and behavior
 
 - `-DryRun` performs no installation, WinGet update, or Windows feature change.
-- Downloaded WinGet packages are signature-checked.
-- Exact package IDs and the official WinGet source are used.
-- Each package is retried independently.
-- Logs are written to `%TEMP%` unless `-LogPath` is supplied, and the full log
-  is also printed to the console at the end of a run (or on a fatal error).
-- A nonzero exit code is returned for fatal or partial failures.
-- DirectPlay requests elevation via a UAC prompt when the shell isn't already
-  elevated. Unattended runs must already be elevated.
-- A restart is never initiated automatically.
-- Installed/current package state is determined from WinGet exit codes rather
-  than localized output text.
-- BAT downloads use a unique temporary directory and clean it up after use.
+- WinGet verifies downloaded installer hashes against its manifests.
+- Exact package IDs and explicit WinGet or Microsoft Store sources are used.
+- Every package is retried and reported independently.
+- Logs are written to `%TEMP%` unless `-LogPath` is supplied.
+- Fatal and partial failures return nonzero exit codes.
+- Installation requests administrator access once at launch. Unattended runs
+  should start in an elevated shell; help, package listing, and dry runs do not
+  require elevation.
+- AEGIS never restarts Windows automatically.
+- Installed/current state is determined from WinGet exit codes rather than
+  localized output text.
 
 ## Exit codes
 
@@ -206,14 +155,10 @@ to see the complete current list.
 
 ```text
 Install.bat        Standalone bootstrap and local-script entry point
-Install.ps1        UI, profiles, manifest, WinGet bootstrap, and install engine
+Install.ps1        Menu, manifest, WinGet bootstrap, and install engine
 tests/             Non-destructive validation
 .github/workflows  Windows PowerShell, PowerShell 7, and release automation
 ```
-
-The BAT remains deliberately small. Installation policy, package selection,
-logging, retries, and verification live in one PowerShell implementation so
-every entry path behaves consistently.
 
 ## Credit
 

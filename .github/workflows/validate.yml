@@ -34,17 +34,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Parse and dry-run in PowerShell 7
+      - name: Run non-destructive validation
         shell: pwsh
-        run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path .\Install.ps1),
-            [ref]$tokens,
-            [ref]$errors
-          )
-          if ($errors.Count) {
-            throw ($errors | ForEach-Object Message | Out-String)
-          }
-          .\Install.ps1 -Profile Modern -IncludeGroup Utilities -DryRun -Unattended -NoColor
+        run: .\tests\Validate.ps1

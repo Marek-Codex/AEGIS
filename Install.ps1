@@ -4,7 +4,7 @@
     AEGIS - Automated Essentials for Gaming Installation System.
 
 .DESCRIPTION
-    Installs curated Windows gaming runtimes and optional applications through
+    Installs the complete curated Windows gaming prerequisite stack through
     WinGet. AEGIS is designed to run as a local script or through:
 
         irm <raw Install.ps1 URL> | iex
@@ -16,13 +16,9 @@
 [CmdletBinding()]
 param(
     [Alias('Profile')]
-    [ValidateSet('Interactive', 'Modern', 'Legacy', 'Full', 'Custom')]
+    [ValidateSet('Interactive', 'Recommended', 'Custom', 'Modern', 'Legacy', 'Full')]
     [string]$AegisProfile = 'Interactive',
 
-    [ValidateSet(
-        'Java', 'Utilities', 'Browsers', 'Launchers', 'Communication',
-        'Capture', 'Monitoring', 'Modding'
-    )]
     [string[]]$IncludeGroup = @(),
 
     [string[]]$IncludePackage = @(),
@@ -38,6 +34,7 @@ param(
     [switch]$SkipWinGetUpdate,
     [switch]$ListPackages,
     [switch]$Help,
+    [switch]$Elevated,
 
     [ValidateRange(1, 10)]
     [int]$RetryCount = 3,
@@ -51,13 +48,24 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$script:AegisBoundParameters = @{} + $PSBoundParameters
 
-$script:AegisVersion = '0.1.0'
+$script:AegisVersion = '0.2.0'
+$script:AegisSourceUrl = 'https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1'
 $script:RunningFromFile = -not [string]::IsNullOrWhiteSpace($PSCommandPath)
 $script:RebootRequired = $false
 $script:Results = New-Object System.Collections.Generic.List[object]
 $script:LogPath = $LogPath
-$script:UseColor = -not $NoColor -and -not [Console]::IsOutputRedirected
+$supportsVirtualTerminal = $false
+try {
+    $supportsVirtualTerminal = [bool]$Host.UI.SupportsVirtualTerminal
+}
+catch {
+    # Legacy hosts use the plain fallback instead of printing escape codes.
+}
+$script:UseColor = -not $NoColor -and -not [Console]::IsOutputRedirected -and
+    $supportsVirtualTerminal
+$script:UseUnicode = $script:UseColor
 $script:AegisIsWindows = $env:OS -eq 'Windows_NT'
 
 if ($script:AegisIsWindows) {
@@ -66,6 +74,17 @@ if ($script:AegisIsWindows) {
     }
     catch {
         # Output encoding is cosmetic; installation can continue.
+    }
+}
+
+if (-not [Console]::IsOutputRedirected) {
+    try {
+        [Console]::BackgroundColor = [ConsoleColor]::Black
+        [Console]::ForegroundColor = [ConsoleColor]::Gray
+        [Console]::Clear()
+    }
+    catch {
+        # Console appearance is cosmetic; unsupported hosts keep their defaults.
     }
 }
 
@@ -152,6 +171,8 @@ SS    ;,. SS    ;,. SS    ;,. ;,. .,;   ;,.
 :;    ;:' `:;;;;;:' `:;;;;;:' ;:' `:;;;;;:'
 '@
 
+    $shellVersion = $PSVersionTable.PSVersion.ToString()
+
     Write-Host ''
     foreach ($line in ($logo -split "`r?`n")) {
         if ($script:UseColor) {
@@ -162,8 +183,13 @@ SS    ;,. SS    ;,. SS    ;,. ;,. .,;   ;,.
             Write-Host $line
         }
     }
-    Write-Aegis 'AUTOMATED ESSENTIALS FOR GAMING INSTALLATION SYSTEM' -Style Muted -SkipLog
-    Write-Aegis ('VERSION {0}' -f $script:AegisVersion) -Style Secondary -SkipLog
+    $architecture = if ([Environment]::Is64BitOperatingSystem) { '64-BIT WINDOWS' } else { '32-BIT WINDOWS' }
+    $rule = if ($script:UseUnicode) { [string][char]0x2501 } else { '=' }
+    Write-Host ''
+    Write-Aegis '  AUTOMATED ESSENTIALS FOR GAMING INSTALLATION SYSTEM' -Style Muted -SkipLog
+    Write-Aegis ('  AEGIS {0}  /  POWERSHELL {1}  /  {2}' -f `
+        $script:AegisVersion, $shellVersion, $architecture) -Style Secondary -SkipLog
+    Write-Aegis ('  ' + ($rule * 62)) -Style Accent -SkipLog
     Write-Host ''
 }
 
@@ -173,21 +199,20 @@ AEGIS - Automated Essentials for Gaming Installation System
 
 USAGE
   .\Install.ps1
-  .\Install.ps1 -Profile Modern
-  .\Install.ps1 -Profile Legacy -IncludeGroup Utilities,Java
-  .\Install.ps1 -Profile Full -WinGetChannel Newest -Unattended
+  .\Install.ps1 -Profile Recommended -Unattended
+  .\Install.ps1 -Profile Custom -IncludeGroup VC++,DotNet,AspNet
   .\Install.ps1 -Profile Custom -IncludePackage Microsoft.DirectX
-  .\Install.ps1 -Profile Modern -DryRun
+  .\Install.ps1 -Profile Recommended -DryRun
 
 PROFILES
-  Modern   Current gaming runtimes.
-  Legacy   Modern baseline plus legacy compatibility runtimes.
-  Full     Every curated runtime and compatibility component.
-  Custom   Only packages supplied with -IncludePackage/-IncludeGroup.
+  Recommended  Complete curated gaming prerequisite stack.
+  Custom       Only components/packages supplied explicitly.
 
-OPTIONAL GROUPS
-  Java, Utilities, Browsers, Launchers, Communication, Capture,
-  Monitoring, Modding
+CUSTOM COMPONENTS
+  VC++, DotNet, AspNet, Gaming, Essentials, Java, Workbench
+
+COMPATIBILITY
+  Modern, Legacy, and Full remain accepted as aliases for Recommended.
 
 WINGET CHANNELS
   Stable   GitHub's latest stable WinGet release.
@@ -212,7 +237,9 @@ function New-AegisPackage {
         [string]$Kind = 'WinGet',
         [string]$FeatureName = '',
         [ValidateSet('Any', 'x64', 'arm64')]
-        [string]$Architecture = 'Any'
+        [string]$Architecture = 'Any',
+        [ValidateSet('winget', 'msstore')]
+        [string]$Source = 'winget'
     )
 
     [pscustomobject]@{
@@ -224,59 +251,82 @@ function New-AegisPackage {
         Kind         = $Kind
         FeatureName  = $FeatureName
         Architecture = $Architecture
+        Source       = $Source
     }
 }
 
 function Get-AegisManifest {
     @(
-        # Modern baseline
-        New-AegisPackage 'Microsoft.VCRedist.2015+.x86' 'Microsoft Visual C++ v14 Redistributable (x86)' 'Modern' @('Modern', 'Legacy', 'Full')
-        New-AegisPackage 'Microsoft.VCRedist.2015+.x64' 'Microsoft Visual C++ v14 Redistributable (x64)' 'Modern' @('Modern', 'Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Microsoft.VCRedist.2015+.arm64' 'Microsoft Visual C++ v14 Redistributable (Arm64)' 'Modern' @('Modern', 'Legacy', 'Full') @() 'WinGet' '' 'arm64'
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.8' 'Microsoft .NET Desktop Runtime 8' 'Modern' @('Modern', 'Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.10' 'Microsoft .NET Desktop Runtime 10' 'Modern' @('Modern', 'Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DirectX' 'DirectX End-User Runtime' 'Modern' @('Modern', 'Legacy', 'Full')
-        New-AegisPackage 'CreativeTechnology.OpenAL' 'OpenAL' 'Modern' @('Modern', 'Legacy', 'Full')
-        New-AegisPackage 'Microsoft.EdgeWebView2Runtime' 'Microsoft Edge WebView2 Runtime' 'Modern' @('Modern', 'Legacy', 'Full')
+        # x86 is required for 32-bit games even on 64-bit Windows.
+        New-AegisPackage 'Microsoft.VCRedist.2005.x86' 'Microsoft Visual C++ 2005 Redistributable (x86)' 'VC++' @('Recommended') @('VC++')
+        New-AegisPackage 'Microsoft.VCRedist.2005.x64' 'Microsoft Visual C++ 2005 Redistributable (x64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.VCRedist.2008.x86' 'Microsoft Visual C++ 2008 Redistributable (x86)' 'VC++' @('Recommended') @('VC++')
+        New-AegisPackage 'Microsoft.VCRedist.2008.x64' 'Microsoft Visual C++ 2008 Redistributable (x64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.VCRedist.2010.x86' 'Microsoft Visual C++ 2010 Redistributable (x86)' 'VC++' @('Recommended') @('VC++')
+        New-AegisPackage 'Microsoft.VCRedist.2010.x64' 'Microsoft Visual C++ 2010 Redistributable (x64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.VCRedist.2012.x86' 'Microsoft Visual C++ 2012 Redistributable (x86)' 'VC++' @('Recommended') @('VC++')
+        New-AegisPackage 'Microsoft.VCRedist.2012.x64' 'Microsoft Visual C++ 2012 Redistributable (x64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.VCRedist.2013.x86' 'Microsoft Visual C++ 2013 Redistributable (x86)' 'VC++' @('Recommended') @('VC++')
+        New-AegisPackage 'Microsoft.VCRedist.2013.x64' 'Microsoft Visual C++ 2013 Redistributable (x64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.VCRedist.2015+.x86' 'Microsoft Visual C++ v14 Redistributable (x86)' 'VC++' @('Recommended') @('VC++')
+        New-AegisPackage 'Microsoft.VCRedist.2015+.x64' 'Microsoft Visual C++ v14 Redistributable (x64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.VCRedist.2015+.arm64' 'Microsoft Visual C++ v14 Redistributable (Arm64)' 'VC++' @('Recommended') @('VC++') 'WinGet' '' 'arm64'
 
-        # Legacy compatibility
-        New-AegisPackage 'Microsoft.VCRedist.2005.x86' 'Microsoft Visual C++ 2005 Redistributable (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.VCRedist.2005.x64' 'Microsoft Visual C++ 2005 Redistributable (x64)' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Microsoft.VCRedist.2008.x86' 'Microsoft Visual C++ 2008 Redistributable (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.VCRedist.2008.x64' 'Microsoft Visual C++ 2008 Redistributable (x64)' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Microsoft.VCRedist.2010.x86' 'Microsoft Visual C++ 2010 Redistributable (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.VCRedist.2010.x64' 'Microsoft Visual C++ 2010 Redistributable (x64)' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Microsoft.VCRedist.2012.x86' 'Microsoft Visual C++ 2012 Redistributable (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.VCRedist.2012.x64' 'Microsoft Visual C++ 2012 Redistributable (x64)' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Microsoft.VCRedist.2013.x86' 'Microsoft Visual C++ 2013 Redistributable (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.VCRedist.2013.x64' 'Microsoft Visual C++ 2013 Redistributable (x64)' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.3_1' 'Microsoft .NET Desktop Runtime 3.1' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.5' 'Microsoft .NET Desktop Runtime 5' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.6' 'Microsoft .NET Desktop Runtime 6' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.6.x86' 'Microsoft .NET Desktop Runtime 6 (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.7' 'Microsoft .NET Desktop Runtime 7' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.7.x86' 'Microsoft .NET Desktop Runtime 7 (x86)' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Microsoft.XNARedist' 'Microsoft XNA Framework Redistributable' 'Legacy' @('Legacy', 'Full')
-        New-AegisPackage 'Nvidia.PhysX' 'NVIDIA PhysX System Software' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Nvidia.PhysXLegacy' 'NVIDIA PhysX Legacy' 'Legacy' @('Legacy', 'Full') @() 'WinGet' '' 'x64'
-        New-AegisPackage 'Windows.DirectPlay' 'DirectPlay' 'Legacy' @('Legacy', 'Full') @() 'WindowsFeature' 'DirectPlay'
+        # All non-preview Windows Desktop runtime families currently in WinGet.
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.3_1' 'Microsoft .NET Desktop Runtime 3.1' '.NET Desktop' @('Recommended') @('DotNet')
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.5' 'Microsoft .NET Desktop Runtime 5' '.NET Desktop' @('Recommended') @('DotNet')
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.6' 'Microsoft .NET Desktop Runtime 6 (x64)' '.NET Desktop' @('Recommended') @('DotNet') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.6.x86' 'Microsoft .NET Desktop Runtime 6 (x86)' '.NET Desktop' @('Recommended') @('DotNet')
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.7' 'Microsoft .NET Desktop Runtime 7 (x64)' '.NET Desktop' @('Recommended') @('DotNet') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.7.x86' 'Microsoft .NET Desktop Runtime 7 (x86)' '.NET Desktop' @('Recommended') @('DotNet')
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.8' 'Microsoft .NET Desktop Runtime 8 (x64)' '.NET Desktop' @('Recommended') @('DotNet') 'WinGet' '' 'x64'
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.8.x86' 'Microsoft .NET Desktop Runtime 8 (x86)' '.NET Desktop' @('Recommended') @('DotNet')
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.8.arm64' 'Microsoft .NET Desktop Runtime 8 (Arm64)' '.NET Desktop' @('Recommended') @('DotNet') 'WinGet' '' 'arm64'
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.9' 'Microsoft .NET Desktop Runtime 9' '.NET Desktop' @('Recommended') @('DotNet')
+        New-AegisPackage 'Microsoft.DotNet.DesktopRuntime.10' 'Microsoft .NET Desktop Runtime 10' '.NET Desktop' @('Recommended') @('DotNet')
 
-        # Optional groups
-        New-AegisPackage 'Amazon.Corretto.25.JDK' 'Amazon Corretto 25 JDK' 'Java' @() @('Java')
-        New-AegisPackage 'M2Team.NanaZip' 'NanaZip' 'Utilities' @() @('Utilities')
-        New-AegisPackage 'Devolutions.UniGetUI' 'UniGetUI' 'Utilities' @() @('Utilities')
-        New-AegisPackage 'Brave.Brave.Beta' 'Brave Beta' 'Browsers' @() @('Browsers')
-        New-AegisPackage 'Valve.Steam' 'Steam' 'Launchers' @() @('Launchers')
-        New-AegisPackage 'EpicGames.EpicGamesLauncher' 'Epic Games Launcher' 'Launchers' @() @('Launchers')
-        New-AegisPackage 'GOG.Galaxy' 'GOG GALAXY' 'Launchers' @() @('Launchers')
-        New-AegisPackage 'HeroicGamesLauncher.HeroicGamesLauncher' 'Heroic' 'Launchers' @() @('Launchers')
-        New-AegisPackage 'Playnite.Playnite' 'Playnite' 'Launchers' @() @('Launchers')
-        New-AegisPackage 'Discord.Discord' 'Discord' 'Communication' @() @('Communication')
-        New-AegisPackage 'OBSProject.OBSStudio' 'OBS Studio' 'Capture' @() @('Capture')
-        New-AegisPackage 'REALiX.HWiNFO' 'HWiNFO' 'Monitoring' @() @('Monitoring')
-        New-AegisPackage 'TechPowerUp.GPU-Z' 'TechPowerUp GPU-Z' 'Monitoring' @() @('Monitoring')
-        New-AegisPackage 'Guru3D.Afterburner' 'MSI Afterburner' 'Monitoring' @() @('Monitoring')
-        New-AegisPackage 'PrismLauncher.PrismLauncher' 'Prism Launcher' 'Modding' @() @('Modding')
+        # Runtime packages only; omit legacy entries WinGet identifies as SDKs.
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.2_1' 'Microsoft ASP.NET Core Runtime 2.1' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.3_1' 'Microsoft ASP.NET Core Runtime 3.1' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.5' 'Microsoft ASP.NET Core Runtime 5' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.6' 'Microsoft ASP.NET Core Runtime 6' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.7' 'Microsoft ASP.NET Core Runtime 7' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.8' 'Microsoft ASP.NET Core Runtime 8' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.9' 'Microsoft ASP.NET Core Runtime 9' 'ASP.NET Core' @('Recommended') @('AspNet')
+        New-AegisPackage 'Microsoft.DotNet.AspNetCore.10' 'Microsoft ASP.NET Core Runtime 10' 'ASP.NET Core' @('Recommended') @('AspNet')
+
+        # Gaming compatibility additions retained from AEGIS.
+        New-AegisPackage 'Microsoft.DirectX' 'DirectX End-User Runtime' 'Gaming Compatibility' @('Recommended') @('Gaming')
+        New-AegisPackage 'Microsoft.XNARedist' 'Microsoft XNA Framework Redistributable' 'Gaming Compatibility' @('Recommended') @('Gaming')
+        New-AegisPackage 'CreativeTechnology.OpenAL' 'OpenAL' 'Gaming Compatibility' @('Recommended') @('Gaming')
+        New-AegisPackage 'Microsoft.EdgeWebView2Runtime' 'Microsoft Edge WebView2 Runtime' 'Gaming Compatibility' @('Recommended') @('Gaming')
+        New-AegisPackage 'Nvidia.PhysX' 'NVIDIA PhysX System Software' 'Gaming Compatibility' @('Recommended') @('Gaming') 'WinGet' '' 'x64'
+        New-AegisPackage 'Nvidia.PhysXLegacy' 'NVIDIA PhysX Legacy' 'Gaming Compatibility' @('Recommended') @('Gaming') 'WinGet' '' 'x64'
+        New-AegisPackage 'Windows.DirectPlay' 'DirectPlay' 'Gaming Compatibility' @('Recommended') @('Gaming') 'WindowsFeature' 'DirectPlay'
+
+        # NanaZip replaces 7-Zip; current PowerShell supplements inbox 5.1.
+        New-AegisPackage 'M2Team.NanaZip' 'NanaZip' 'Essentials' @('Recommended') @('Essentials')
+        New-AegisPackage 'Microsoft.PowerShell' 'PowerShell' 'Essentials' @('Recommended') @('Essentials')
+
+        # Java is part of the default gaming/development compatibility stack.
+        New-AegisPackage 'Amazon.Corretto.25.JDK' 'Amazon Corretto 25 JDK' 'Java' @('Recommended') @('Java')
+
+        # Optional desktop tools, including explicitly labeled prerelease channels.
+        New-AegisPackage -Id 'Devolutions.UniGetUI' -Name 'UniGetUI' `
+            -Category 'Power User Workbench' -Groups @('Workbench')
+        New-AegisPackage -Id 'voidtools.Everything.Beta' -Name 'Everything Beta [PRE-RELEASE]' `
+            -Category 'Power User Workbench' -Groups @('Workbench')
+        New-AegisPackage -Id 'VideoLAN.VLC.Nightly' -Name 'VLC Nightly [PRE-RELEASE]' `
+            -Category 'Power User Workbench' -Groups @('Workbench')
+        New-AegisPackage -Id '9N5JJZW4QZBR' -Name 'Xtreme Download Manager (Microsoft Store)' `
+            -Category 'Power User Workbench' -Groups @('Workbench') -Source 'msstore'
+        New-AegisPackage -Id 'SublimeHQ.SublimeText.4' -Name 'Sublime Text 4' `
+            -Category 'Power User Workbench' -Groups @('Workbench')
+        New-AegisPackage -Id 'Microsoft.VisualStudioCode.Insiders' `
+            -Name 'Visual Studio Code Insiders [PRE-RELEASE]' `
+            -Category 'Power User Workbench' -Groups @('Workbench')
+        New-AegisPackage -Id 'AntibodySoftware.WizTree' -Name 'WizTree' `
+            -Category 'Power User Workbench' -Groups @('Workbench')
     )
 }
 
@@ -292,7 +342,9 @@ function Test-PackageArchitecture {
 
     $architecture = Get-NativeArchitecture
     switch ($Package.Architecture) {
-        'x64' { return $architecture -eq 'AMD64' }
+        # Windows 11 on Arm can run x64 and x86 applications, so those runtime
+        # families remain relevant there as well.
+        'x64' { return $architecture -in @('AMD64', 'ARM64') }
         'arm64' { return $architecture -eq 'ARM64' }
         default { return $true }
     }
@@ -328,20 +380,25 @@ function Get-SelectedPackages {
     }
 
     $categoryOrder = @{
-        Modern       = 0
-        Legacy       = 1
-        Java         = 10
-        Utilities    = 11
-        Browsers     = 12
-        Launchers    = 13
-        Communication = 14
-        Capture      = 15
-        Monitoring   = 16
-        Modding      = 17
+        'VC++'                  = 0
+        '.NET Desktop'          = 1
+        'ASP.NET Core'          = 2
+        'Gaming Compatibility'  = 3
+        Essentials              = 4
+        Java                    = 5
+        'Power User Workbench'  = 6
+    }
+
+    $architectureOrder = @{
+        Any   = 0
+        x64   = 1
+        arm64 = 2
     }
 
     return @($selected | Sort-Object `
-        @{ Expression = { $categoryOrder[$_.Category] } }, Name -Unique)
+        @{ Expression = { $categoryOrder[$_.Category] } }, `
+        @{ Expression = { $_.Name -replace ' \((x86|x64|Arm64)\)$', '' } }, `
+        @{ Expression = { $architectureOrder[$_.Architecture] } }, Name -Unique)
 }
 
 function Read-MenuChoice {
@@ -369,17 +426,25 @@ function Read-MenuChoice {
             while ($true) {
                 [Console]::Clear()
                 Show-AegisHeader
-                $width = [Math]::Max(29, [Console]::WindowWidth - 1)
-                Write-Aegis $Prompt.PadRight($width) -Style Accent -SkipLog
+                $width = [Math]::Max(29, [Math]::Min(68, [Console]::WindowWidth - 2))
+                Write-Aegis ('  {0}' -f $Prompt) -Style Accent -SkipLog
+                Write-Host ''
                 for ($index = 0; $index -lt $Choices.Count; $index++) {
-                    $prefix = if ($index -eq $position) { '  > ' } else { '    ' }
+                    $activeMarker = if ($script:UseUnicode) { [string][char]0x25B8 } else { '>' }
+                    $prefix = if ($index -eq $position) { '  ' + $activeMarker } else { '   ' }
                     $style = if ($index -eq $position) { 'Secondary' } else { 'Normal' }
-                    Write-Aegis (($prefix + $Choices[$index]).PadRight($width)) `
+                    $parts = @($Choices[$index] -split '\s+//\s+', 2)
+                    Write-Aegis ('{0}  {1:D2}  {2}' -f $prefix, ($index + 1), $parts[0].ToUpperInvariant()) `
                         -Style $style -SkipLog
+                    if ($parts.Count -gt 1) {
+                        Write-Aegis ('          {0}' -f $parts[1]) -Style Muted -SkipLog
+                    }
+                    if ($index -lt ($Choices.Count - 1)) {
+                        Write-Host ''
+                    }
                 }
-                Write-Aegis '  Arrows/WASD: move  Enter: select  0: cancel'.PadRight($width) `
-                    -Style Muted -SkipLog
-                Write-Aegis ''.PadRight($width) -SkipLog
+                Write-Host ''
+                Write-Aegis '  UP/DOWN  MOVE     ENTER  SELECT     0  CANCEL' -Style Muted -SkipLog
 
                 $key = [Console]::ReadKey($true)
                 switch ($key.Key) {
@@ -440,8 +505,17 @@ function Read-MenuChoice {
     }
 }
 
-function Read-OptionalGroups {
-    $groups = @('Java', 'Utilities', 'Browsers', 'Launchers', 'Communication', 'Capture', 'Monitoring', 'Modding')
+function Read-CustomComponents {
+    $groups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Workbench')
+    $labels = @(
+        'VC++ Redistributables (x86 + native 64-bit)'
+        '.NET Desktop Runtimes'
+        'ASP.NET Core Runtimes'
+        'Gaming Compatibility (DirectX, XNA, OpenAL, WebView2, PhysX, DirectPlay)'
+        'Essentials (NanaZip + current PowerShell)'
+        'Java (Amazon Corretto JDK)'
+        'Power User Workbench [OPTIONAL / PRE-RELEASE SOFTWARE]'
+    )
     $useInteractiveKeys = $false
     try {
         $useInteractiveKeys = -not [Console]::IsInputRedirected -and
@@ -455,30 +529,35 @@ function Read-OptionalGroups {
     if ($useInteractiveKeys) {
         $position = 0
         $checked = New-Object 'bool[]' $groups.Count
+        for ($index = 0; $index -lt 6; $index++) {
+            $checked[$index] = $true
+        }
 
         try {
             [Console]::CursorVisible = $false
             while ($true) {
                 [Console]::Clear()
                 Show-AegisHeader
-                $width = [Math]::Max(39, [Console]::WindowWidth - 1)
                 $selectedCount = @($checked | Where-Object { $_ }).Count
-                Write-Aegis ('OPTIONAL GROUPS - {0} SELECTED' -f $selectedCount).PadRight($width) `
-                    -Style Accent -SkipLog
+                Write-Aegis '  CUSTOM DEPLOYMENT' -Style Accent -SkipLog
+                Write-Aegis ('  {0} OF {1} COMPONENT FAMILIES ARMED' -f $selectedCount, $groups.Count) `
+                    -Style Muted -SkipLog
+                Write-Host ''
 
                 for ($index = 0; $index -lt $groups.Count; $index++) {
-                    $cursor = if ($index -eq $position) { '>' } else { ' ' }
-                    $mark = if ($checked[$index]) { 'x' } else { ' ' }
+                    $cursor = if ($index -eq $position) {
+                        if ($script:UseUnicode) { [string][char]0x25B8 } else { '>' }
+                    }
+                    else { ' ' }
+                    $mark = if ($checked[$index]) { '+' } else { '-' }
                     $style = if ($index -eq $position) { 'Secondary' } else { 'Normal' }
-                    Write-Aegis ('  {0} [{1}] {2}' -f $cursor, $mark, $groups[$index]).PadRight($width) `
+                    Write-Aegis ('  {0}  [{1}]  {2}' -f $cursor, $mark, $labels[$index]) `
                         -Style $style -SkipLog
                 }
 
-                Write-Aegis '  Arrows/WASD: move  Space: toggle'.PadRight($width) `
-                    -Style Muted -SkipLog
-                Write-Aegis '  A: all  N: none  Enter: continue  0: back'.PadRight($width) `
-                    -Style Muted -SkipLog
-                Write-Aegis ''.PadRight($width) -SkipLog
+                Write-Host ''
+                Write-Aegis '  UP/DOWN  MOVE     SPACE  TOGGLE     ENTER  CONTINUE' -Style Muted -SkipLog
+                Write-Aegis '  A  ALL            N  NONE         0  BACK' -Style Muted -SkipLog
 
                 $key = [Console]::ReadKey($true)
                 switch ($key.Key) {
@@ -530,16 +609,17 @@ function Read-OptionalGroups {
         }
     }
 
-    Write-Aegis 'OPTIONAL GROUPS' -Style Accent
+    Write-Aegis 'CUSTOMIZE' -Style Accent
     for ($index = 0; $index -lt $groups.Count; $index++) {
-        Write-Aegis ('  [{0}] {1}' -f ($index + 1), $groups[$index])
+        $defaultMarker = if ($index -lt 5) { ' [default]' } else { '' }
+        Write-Aegis ('  [{0}] {1}{2}' -f ($index + 1), $labels[$index], $defaultMarker)
     }
     Write-Aegis '  [0] Back to profile selection' -Style Normal
-    Write-Aegis 'Enter comma-separated numbers, 0 to go back, or press Enter for none.' -Style Muted
+    Write-Aegis 'Enter comma-separated numbers, 0 to go back, or press Enter for defaults.' -Style Muted
     $answer = Read-Host 'Select'
 
     if ([string]::IsNullOrWhiteSpace($answer)) {
-        return ,@()
+        return ,$groups[0..4]
     }
 
     if ($answer.Trim() -eq '0') {
@@ -551,7 +631,7 @@ function Read-OptionalGroups {
         $number = 0
         if (-not [int]::TryParse($token.Trim(), [ref]$number) -or
             $number -lt 1 -or $number -gt $groups.Count) {
-            throw "Invalid optional group selection: $token"
+            throw "Invalid component selection: $token"
         }
         if (-not $selected.Contains($groups[$number - 1])) {
             $selected.Add($groups[$number - 1])
@@ -773,9 +853,12 @@ function Add-AegisResult {
 }
 
 function Get-WinGetPackageState {
-    param([string]$Id)
+    param(
+        [string]$Id,
+        [string]$Source = 'winget'
+    )
 
-    $null = & winget list --exact --id $Id --source winget `
+    $null = & winget list --exact --id $Id --source $Source `
         --accept-source-agreements --disable-interactivity 2>&1
     $exitCode = $LASTEXITCODE
 
@@ -804,7 +887,7 @@ function Install-WinGetPackage {
         return
     }
 
-    $installedState = Get-WinGetPackageState -Id $Package.Id
+    $installedState = Get-WinGetPackageState -Id $Package.Id -Source $Package.Source
     $operation = if ($installedState -eq 'Installed' -and -not $ForceInstall) {
         'upgrade'
     }
@@ -814,7 +897,7 @@ function Install-WinGetPackage {
 
     $arguments = @(
         $operation, '--exact', '--id', $Package.Id,
-        '--source', 'winget',
+        '--source', $Package.Source,
         '--accept-package-agreements',
         '--accept-source-agreements',
         '--disable-interactivity',
@@ -861,7 +944,18 @@ function Install-WinGetPackage {
         }
     }
 
-    $detail = ($output -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+    $escapePattern = [regex]::Escape([string][char]27) + '\[[0-?]*[ -/]*[@-~]'
+    $cleanOutput = $output -replace $escapePattern, ''
+    $lastLine = $cleanOutput -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1
+    $lastLine = if ($null -eq $lastLine) { '' } else { $lastLine.Trim() }
+    if ($lastLine.Length -gt 140) {
+        $lastLine = $lastLine.Substring(0, 137) + '...'
+    }
+    $unsignedExitCode = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$exitCode), 0)
+    $detail = 'WinGet exit 0x{0:X8}' -f $unsignedExitCode
+    if ($lastLine) {
+        $detail += ': ' + $lastLine
+    }
     Write-Aegis ('  FAILED  {0}' -f $Package.Name) -Style Failure
     Add-AegisResult -Package $Package -Status Failed -ExitCode $exitCode -Detail $detail
 }
@@ -870,6 +964,74 @@ function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function ConvertTo-AegisCommandLiteral {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) {
+        return '$null'
+    }
+
+    return "'{0}'" -f ("$Value" -replace "'", "''")
+}
+
+function Start-AegisElevated {
+    $enginePath = (Get-Process -Id $PID).Path
+    if ($script:RunningFromFile) {
+        $commandParts = @('&', (ConvertTo-AegisCommandLiteral -Value $PSCommandPath), '-Elevated')
+    }
+    else {
+        $commandParts = @(
+            '& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing -Uri',
+            (ConvertTo-AegisCommandLiteral -Value $script:AegisSourceUrl),
+            ')))',
+            '-Elevated'
+        )
+    }
+
+    foreach ($entry in $script:AegisBoundParameters.GetEnumerator()) {
+        if ($entry.Key -eq 'Elevated') {
+            continue
+        }
+
+        if ($entry.Value -is [System.Management.Automation.SwitchParameter]) {
+            if ($entry.Value.IsPresent) {
+                $commandParts += '-{0}' -f $entry.Key
+            }
+            continue
+        }
+
+        $commandParts += '-{0}' -f $entry.Key
+        if ($entry.Value -is [array]) {
+            $commandParts += ConvertTo-AegisCommandLiteral -Value (($entry.Value | ForEach-Object { "$_" }) -join ',')
+        }
+        else {
+            $commandParts += ConvertTo-AegisCommandLiteral -Value $entry.Value
+        }
+    }
+
+    $command = $commandParts -join ' '
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    Write-Aegis 'Administrator access is required once for the complete installation.' -Style Warning
+    try {
+        $process = Start-Process -FilePath $enginePath -Verb RunAs -Wait -PassThru `
+            -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded)
+    }
+    catch {
+        $nativeErrorCode = if ($_.Exception.PSObject.Properties['NativeErrorCode']) {
+            $_.Exception.NativeErrorCode
+        }
+        else {
+            0
+        }
+        if ($nativeErrorCode -eq 1223 -or $_.Exception.Message -match 'cancel') {
+            Write-Aegis 'Administrator request cancelled. No installation was started.' -Style Warning
+            return 0
+        }
+        throw
+    }
+    return $process.ExitCode
 }
 
 function Install-WindowsFeaturePackage {
@@ -882,35 +1044,8 @@ function Install-WindowsFeaturePackage {
     }
 
     try {
-        # Get-WindowsOptionalFeature -Online itself requires elevation (it throws
-        # "The requested operation requires elevation" even just to query state),
-        # so admin status must be checked before touching it, not after.
         if (-not (Test-IsAdministrator)) {
-            if ($Unattended) {
-                throw ('{0} requires an elevated (Run as Administrator) shell during unattended installation.' -f $Package.Name)
-            }
-
-            Write-Aegis ('  {0} requires elevation. Approve the UAC prompt.' -f $Package.Name) -Style Warning
-            $dismPath = Join-Path $env:SystemRoot 'System32\dism.exe'
-            $process = Start-Process -FilePath $dismPath -Verb RunAs -Wait -PassThru `
-                -ArgumentList @(
-                    '/Online',
-                    '/Enable-Feature',
-                    ('/FeatureName:{0}' -f $Package.FeatureName),
-                    '/All',
-                    '/NoRestart'
-                )
-
-            if ($process.ExitCode -eq 3010) {
-                $script:RebootRequired = $true
-            }
-            elseif ($process.ExitCode -ne 0) {
-                throw "Elevated DISM exited with code $($process.ExitCode)."
-            }
-
-            Write-Aegis ('  DONE  {0}' -f $Package.Name) -Style Success
-            Add-AegisResult -Package $Package -Status Installed
-            return
+            throw ('{0} requires administrator access, but the AEGIS session is not elevated.' -f $Package.Name)
         }
 
         $feature = Get-WindowsOptionalFeature -Online -FeatureName $Package.FeatureName
@@ -955,24 +1090,48 @@ function Show-Summary {
         $counts[$status] = @($script:Results | Where-Object { $_.Status -eq $status }).Count
     }
 
-    Write-Host ''
-    Write-Aegis 'SUMMARY' -Style Accent
-    Write-Aegis ('  Installed  {0}' -f $counts.Installed) -Style Success
-    Write-Aegis ('  Current    {0}' -f $counts.Current) -Style Muted
-    Write-Aegis ('  Planned    {0}' -f $counts.Planned) -Style Accent
-    Write-Aegis ('  Failed     {0}' -f $counts.Failed) -Style $(if ($counts.Failed) { 'Failure' } else { 'Muted' })
-
-    if ($counts.Failed -gt 0) {
+    $interactiveDisplay = -not $Unattended -and -not [Console]::IsOutputRedirected
+    if ($interactiveDisplay) {
+        [Console]::Clear()
+        Show-AegisHeader
+    }
+    else {
         Write-Host ''
-        foreach ($result in ($script:Results | Where-Object { $_.Status -eq 'Failed' })) {
-            Write-Aegis ('  {0}: {1}' -f $result.Name, $result.Detail) -Style Failure
+    }
+
+    Write-Aegis '  DEPLOYMENT COMPLETE' -Style Accent
+    Write-Aegis ('  {0} INSTALLED  /  {1} CURRENT  /  {2} FAILED' -f `
+        $counts.Installed, $counts.Current, $counts.Failed) `
+        -Style $(if ($counts.Failed) { 'Warning' } else { 'Success' })
+
+    $currentCategory = ''
+    foreach ($result in $script:Results) {
+        if ($result.Category -ne $currentCategory) {
+            $currentCategory = $result.Category
+            Write-Host ''
+            Write-Aegis ('  {0}' -f $currentCategory.ToUpperInvariant()) -Style Secondary
+        }
+
+        $statusStyle = switch ($result.Status) {
+            'Installed' { 'Success' }
+            'Failed' { 'Failure' }
+            'Planned' { 'Accent' }
+            default { 'Muted' }
+        }
+        Write-Aegis ('    {0,-9} {1}' -f $result.Status.ToUpperInvariant(), $result.Name) `
+            -Style $statusStyle
+        if ($result.Status -eq 'Failed' -and $result.Detail) {
+            Write-Aegis ('              {0}' -f $result.Detail) -Style Failure
         }
     }
 
     if ($script:RebootRequired) {
-        Write-Aegis 'A restart is recommended.' -Style Warning
+        Write-Host ''
+        Write-Aegis '  RESTART RECOMMENDED' -Style Warning
+        Write-Aegis '  Finish your work and restart Windows to complete setup.' -Style Warning
     }
-    Write-Aegis ('Log: {0}' -f $script:LogPath) -Style Muted
+    Write-Host ''
+    Write-Aegis ('  FULL LOG  {0}' -f $script:LogPath) -Style Muted
 }
 
 function Show-FinalLog {
@@ -1005,44 +1164,79 @@ function Invoke-Aegis {
             throw 'AEGIS requires Windows 10 or Windows 11.'
         }
 
+        if (-not $Help -and -not $ListPackages -and -not $DryRun -and -not (Test-IsAdministrator)) {
+            if ($Elevated) {
+                throw 'Windows did not grant administrator access to the elevated AEGIS session.'
+            }
+            return (Start-AegisElevated)
+        }
+
         Write-AegisLog -Message ('AEGIS {0} started. Arguments: {1}' -f
             $script:AegisVersion, ($MyInvocation.Line)) -Level INFO
         Show-AegisHeader
+
+        # PowerShell's native executable boundary can deliver comma-separated
+        # values as one string even when the parameter type is string[]. Make
+        # the documented CLI form and programmatic array form equivalent.
+        $script:IncludeGroup = @($IncludeGroup | ForEach-Object { "$_" -split ',' } |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $script:IncludePackage = @($IncludePackage | ForEach-Object { "$_" -split ',' } |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $script:ExcludePackage = @($ExcludePackage | ForEach-Object { "$_" -split ',' } |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
+        $validGroups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Workbench')
+        foreach ($group in $IncludeGroup) {
+            if ($validGroups -notcontains $group) {
+                throw "Unknown component supplied to -IncludeGroup: $group"
+            }
+        }
 
         $manifest = @(Get-AegisManifest)
 
         if ($ListPackages) {
             $manifest |
-                Select-Object Category, Name, Id, Kind, Architecture |
+                Select-Object Category, Name, Id, Source, Kind, Architecture |
                 Format-Table -AutoSize |
                 Out-Host
             return 0
         }
 
         if ($AegisProfile -eq 'Interactive' -and $Unattended) {
-            $script:AegisProfile = 'Modern'
+            $script:AegisProfile = 'Recommended'
+        }
+
+        if ($AegisProfile -in @('Modern', 'Legacy', 'Full')) {
+            Write-Aegis ('Profile {0} is now an alias for Recommended.' -f $AegisProfile) `
+                -Style Muted
+            $script:AegisProfile = 'Recommended'
         }
 
         $sessionHadFailure = $false
 
         while ($true) {
-            $explicitGroups = $IncludeGroup.Count -gt 0
             $selected = @()
 
-            if (-not $Unattended -and ($AegisProfile -eq 'Interactive' -or -not $explicitGroups)) {
+            if (-not $Unattended -and $AegisProfile -eq 'Interactive') {
                 while ($true) {
-                    if ($AegisProfile -eq 'Interactive') {
-                        $chosenProfile = Read-MenuChoice -Prompt 'INSTALLATION PROFILE' `
-                            -Choices @('Modern', 'Legacy', 'Full', 'Custom') -Default 0
-                        if ($null -eq $chosenProfile) {
-                            Write-Aegis 'Cancelled.' -Style Warning
-                            return 0
-                        }
-                        $script:AegisProfile = $chosenProfile
+                    $action = Read-MenuChoice -Prompt 'WHAT WOULD YOU LIKE TO DO?' `
+                        -Choices @(
+                            'Install recommended  // complete 40-item prerequisite stack'
+                            'Customize            // choose component families'
+                            'Exit'
+                        ) -Default 0
+                    if ($null -eq $action -or $action -eq 'Exit') {
+                        Write-Aegis 'Cancelled.' -Style Warning
+                        return 0
                     }
 
-                    if (-not $explicitGroups) {
-                        $chosenGroups = Read-OptionalGroups
+                    if ($action -like 'Install recommended*') {
+                        $script:AegisProfile = 'Recommended'
+                        $script:IncludeGroup = @()
+                    }
+                    else {
+                        $script:AegisProfile = 'Custom'
+                        $chosenGroups = Read-CustomComponents
                         if ($null -eq $chosenGroups) {
                             $script:AegisProfile = 'Interactive'
                             continue
@@ -1054,11 +1248,11 @@ function Invoke-Aegis {
                         -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
                         -ExcludedPackages $ExcludePackage)
 
-                    if ($selected.Count -gt 0 -or $AegisProfile -ne 'Custom' -or $IncludePackage.Count -gt 0) {
+                    if ($selected.Count -gt 0) {
                         break
                     }
 
-                    Write-Aegis 'Custom needs at least one optional group selected (Space to toggle). Choose again.' `
+                    Write-Aegis 'Select at least one component. Choose again.' `
                         -Style Warning
                 }
             }
@@ -1089,13 +1283,33 @@ function Invoke-Aegis {
                 Ensure-WinGet -Channel $WinGetChannel -SkipUpdate:$SkipWinGetUpdate
             }
 
+            $categories = @($selected | Select-Object -ExpandProperty Category -Unique)
+            $stageNumber = 0
+            $packageNumber = 0
+            $packagesInStage = 0
             $currentCategory = ''
             foreach ($package in $selected) {
                 if ($package.Category -ne $currentCategory) {
                     $currentCategory = $package.Category
+                    $stageNumber++
+                    $packageNumber = 0
+                    $packagesInStage = @($selected | Where-Object { $_.Category -eq $currentCategory }).Count
+                    if (-not $Unattended -and -not [Console]::IsOutputRedirected) {
+                        [Console]::Clear()
+                        Show-AegisHeader
+                    }
+                    else {
+                        Write-Host ''
+                    }
+                    Write-Aegis ('  STAGE {0:D2} / {1:D2}' -f $stageNumber, $categories.Count) `
+                        -Style Muted
+                    Write-Aegis ('  {0}' -f $currentCategory.ToUpperInvariant()) -Style Secondary
                     Write-Host ''
-                    Write-Aegis $currentCategory.ToUpperInvariant() -Style Secondary
                 }
+
+                $packageNumber++
+                Write-Aegis ('  PACKAGE {0:D2} / {1:D2}' -f $packageNumber, $packagesInStage) `
+                    -Style Muted
 
                 if ($package.Kind -eq 'WindowsFeature') {
                     Install-WindowsFeaturePackage -Package $package
@@ -1117,9 +1331,8 @@ function Invoke-Aegis {
             }
 
             Write-Host ''
-            $nextAction = Read-MenuChoice -Prompt 'RUN COMPLETE' -Choices @('Exit', 'Main menu') -Default 0
-            if ($nextAction -ne 'Main menu') {
-                Show-FinalLog
+            $nextAction = Read-Host '  ENTER  EXIT     M  MAIN MENU'
+            if ($nextAction.Trim() -notmatch '^[Mm]$') {
                 return $(if ($sessionHadFailure) { 2 } else { 0 })
             }
 
