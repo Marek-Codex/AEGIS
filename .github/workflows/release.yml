@@ -21,22 +21,67 @@ jobs:
         shell: powershell
         run: .\tests\Validate.ps1
 
-      - name: Build release archive and checksums
+      - name: Build release artifacts and checksums
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           $version = '${{ github.ref_name }}'
           $stage = Join-Path $env:RUNNER_TEMP "AEGIS-$version"
           New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item Install.ps1, Install.bat, README.md, LICENSE -Destination $stage
+
+          Copy-Item Install.ps1, README.md, LICENSE -Destination $stage
+          $releaseBat = (Get-Content -Raw Install.bat).Replace(
+            'https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main',
+            "https://github.com/Marek-Codex/AEGIS/raw/refs/tags/$version"
+          )
+          $stageBat = Join-Path $stage 'Install.bat'
+          Set-Content -LiteralPath $stageBat -Value $releaseBat -Encoding ASCII
+          Copy-Item $stageBat "AEGIS-$version.bat"
+
           Compress-Archive -Path $stage -DestinationPath "AEGIS-$version.zip"
-          Get-FileHash "AEGIS-$version.zip" -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash)  AEGIS-$version.zip" } |
-            Set-Content "AEGIS-$version.sha256" -Encoding ASCII
+          & tar.exe -czf "AEGIS-$version.tar.gz" -C $env:RUNNER_TEMP "AEGIS-$version"
+          if ($LASTEXITCODE -ne 0) {
+            throw "tar.exe failed with exit code $LASTEXITCODE."
+          }
+
+          $gzipPath = "AEGIS-$version-Install.ps1.gz"
+          $input = [IO.File]::OpenRead((Resolve-Path 'Install.ps1'))
+          $output = [IO.File]::Create((Join-Path $PWD $gzipPath))
+          try {
+            $gzip = New-Object IO.Compression.GZipStream(
+              $output,
+              [IO.Compression.CompressionMode]::Compress
+            )
+            try {
+              $input.CopyTo($gzip)
+            }
+            finally {
+              $gzip.Dispose()
+            }
+          }
+          finally {
+            $input.Dispose()
+            $output.Dispose()
+          }
+
+          $artifacts = @(
+            "AEGIS-$version.bat"
+            "AEGIS-$version.zip"
+            "AEGIS-$version.tar.gz"
+            $gzipPath
+          )
+          $artifacts | ForEach-Object {
+            $hash = Get-FileHash $_ -Algorithm SHA256
+            "$($hash.Hash)  $($hash.Path | Split-Path -Leaf)"
+          } | Set-Content 'SHA256SUMS.txt' -Encoding ASCII
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           files: |
+            AEGIS-${{ github.ref_name }}.bat
             AEGIS-${{ github.ref_name }}.zip
-            AEGIS-${{ github.ref_name }}.sha256
+            AEGIS-${{ github.ref_name }}.tar.gz
+            AEGIS-${{ github.ref_name }}-Install.ps1.gz
+            SHA256SUMS.txt

@@ -50,6 +50,11 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\Install.ps1
 ```
 
+Versioned downloads are available under [Releases](../../releases). Each
+release includes a standalone tag-pinned BAT, a ZIP, a `tar.gz`, gzip-compressed
+PowerShell source, and a SHA-256 checksum manifest. GitHub also provides its
+standard source ZIP and source tarball.
+
 ## What the recommended installation includes
 
 ### Visual C++
