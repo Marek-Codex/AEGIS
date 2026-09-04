@@ -15,155 +15,98 @@
 
 </div>
 
-AEGIS installs the complete curated prerequisite stack for Windows gaming:
-Visual C++ redistributables, .NET Desktop and ASP.NET Core runtimes, legacy
-gaming components, and a few deliberate essentials. It is built for a clean
-Windows installation but is safe to run again later.
+AEGIS prepares a clean Windows installation for gaming. It installs the
+runtimes older and newer games expect, repairs WinGet when necessary, and shows
+the exact plan before changing anything.
 
-No debloat rituals, registry folklore, launchers, browsers, chat clients, or
-monitoring suites. Choose the recommended installation or customize the
-runtime categories before anything changes. An optional Power User Workbench
-is kept separate from the prerequisite baseline.
+No debloat presets, registry folklore, launchers, browsers, or mystery tweaks.
 
-> AEGIS is under active development. Review the installation plan before using
-> it on a production system.
+## Run it
 
-## Run AEGIS
-
-Open Windows PowerShell and run:
+Open Windows PowerShell and paste:
 
 ```powershell
 irm https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1 |
   % { $_.TrimStart([char]0xFEFF) } | iex
 ```
 
-The `TrimStart` guard makes the command tolerant of a stray UTF-8 byte-order
-mark introduced by an HTTP client, proxy, or cache. Do not run remote scripts
-you have not inspected. Pin the URL to a release tag or commit SHA for
-reproducible deployments.
+Or download [`Install.bat`](Install.bat). If `Install.ps1` is beside it, the BAT
+uses that copy. Otherwise, it downloads the current script to a temporary
+folder and runs it.
 
-Alternatively, download and run [`Install.bat`](Install.bat), or run the
-PowerShell file directly:
+AEGIS supports Windows PowerShell 5.1 and PowerShell 7 on Windows 10 and 11.
+Installation asks for administrator access once. Help, package listing, and dry
+runs do not require elevation.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\Install.ps1
-```
+> Review remote scripts before running them. For a fixed, reproducible build,
+> use a versioned download from the
+> [latest release](https://github.com/Marek-Codex/AEGIS/releases/latest).
 
-Versioned downloads are available under [Releases](../../releases). Each
-release includes a standalone tag-pinned BAT, a ZIP, a `tar.gz`, gzip-compressed
-PowerShell source, and a SHA-256 checksum manifest. GitHub also provides its
-standard source ZIP and source tarball.
+## Recommended stack
 
-## What the recommended installation includes
+The recommended profile installs 40 items on x64 Windows:
 
-### Visual C++
+- Visual C++ 2005, 2008, 2010, 2012, 2013, and current v14, including x86
+- .NET Desktop Runtime 3.1, 5, 6, 7, 8, 9, and 10
+- ASP.NET Core Runtime 2.1, 3.1, 5, 6, 7, 8, 9, and 10
+- DirectX, XNA, OpenAL, WebView2, PhysX, PhysX Legacy, and DirectPlay
+- NanaZip and current PowerShell
+- Amazon Corretto 25 JDK
 
-- Microsoft Visual C++ 2005, 2008, 2010, 2012, 2013, and current v14
-- Both x86 and x64 on x64 Windows because 32-bit games still require x86
-- Native Arm64 v14 support on Arm64 Windows
+Arm64 systems receive native packages where they are available. AEGIS installs
+x86 VC++ components on 64-bit Windows because 32-bit games still need them.
 
-### .NET Desktop
+Each component family runs on its own progress screen. The final screen lists
+every item as installed, current, planned, or failed and provides the full log
+path. AEGIS never restarts Windows automatically.
 
-- Every non-preview Windows Desktop runtime family currently published in
-  WinGet: 3.1, 5, 6, 7, 8, 9, and 10
-- Available x86 variants are included alongside native 64-bit variants
+## Optional Workbench
 
-### ASP.NET Core
+Customize includes a disabled-by-default Power User Workbench:
 
-- Runtime packages for 2.1, 3.1, 5, 6, 7, 8, 9, and 10
-- Old similarly named packages that WinGet identifies as SDKs are excluded
+- UniGetUI
+- Everything Beta
+- VLC Nightly
+- Xtreme Download Manager from the Microsoft Store
+- Sublime Text 4
+- Visual Studio Code Insiders
+- WizTree
 
-### Gaming compatibility
+Prerelease applications are labeled in the installation plan and are never
+part of Recommended.
 
-- DirectX End-User Runtime
-- Microsoft XNA Framework Redistributable
-- OpenAL
-- Microsoft Edge WebView2 Runtime
-- NVIDIA PhysX and PhysX Legacy
-- DirectPlay Windows feature
-
-### Essentials
-
-- NanaZip, replacing 7-Zip
-- Current PowerShell, supplementing the inbox Windows PowerShell 5.1
-
-Amazon Corretto 25 JDK is included in the recommended stack and can be disabled
-through Customize.
-
-## How it works
-
-```text
-Launch AEGIS
-  -> Install recommended / Customize / Exit
-  -> Review the exact installation plan
-  -> Repair or update WinGet when needed
-  -> Install each selected prerequisite independently
-  -> Show a complete result summary and save the full log
-```
-
-The recommended path installs everything above. Customize exposes seven broad
-components: `VC++`, `DotNet`, `AspNet`, `Gaming`, `Essentials`, `Java`, and
-`Workbench`.
-
-The optional Workbench installs UniGetUI, Everything Beta, VLC Nightly, Xtreme
-Download Manager from the Microsoft Store, Sublime Text 4, and Visual Studio
-Code Insiders, plus WizTree. Prerelease applications are labeled clearly and
-are never part of Recommended.
-
-## Automation and previews
+## Useful commands
 
 ```powershell
 # Preview the recommended stack without changing Windows
 .\Install.ps1 -Profile Recommended -DryRun -Unattended
 
-# Install the recommended stack non-interactively (elevate the shell first)
+# Install the recommended stack from an elevated shell
 .\Install.ps1 -Profile Recommended -Unattended
 
-# Install selected components only
+# Install selected component families
 .\Install.ps1 -Profile Custom -IncludeGroup VC++,DotNet,AspNet -Unattended
 
-# Install the optional Power User Workbench
+# Install only the optional Workbench
 .\Install.ps1 -Profile Custom -IncludeGroup Workbench -Unattended
 
-# List every package in the manifest
+# Show the complete manifest
 .\Install.ps1 -ListPackages
 ```
 
-The former `Modern`, `Legacy`, and `Full` profile names remain accepted as
-compatibility aliases for `Recommended`.
+`Modern`, `Legacy`, and `Full` remain accepted as aliases for `Recommended`.
+Exit code `0` means success, `1` means a fatal setup error, and `2` means one or
+more selected items failed.
 
-## Safety and behavior
+## Releases
 
-- `-DryRun` performs no installation, WinGet update, or Windows feature change.
-- WinGet verifies downloaded installer hashes against its manifests.
-- Exact package IDs and explicit WinGet or Microsoft Store sources are used.
-- Every package is retried and reported independently.
-- Logs are written to `%TEMP%` unless `-LogPath` is supplied.
-- Fatal and partial failures return nonzero exit codes.
-- Installation requests administrator access once at launch. Unattended runs
-  should start in an elevated shell; help, package listing, and dry runs do not
-  require elevation.
-- AEGIS never restarts Windows automatically.
-- Installed/current state is determined from WinGet exit codes rather than
-  localized output text.
+Each release includes a version-pinned BAT, ZIP, `tar.gz`, gzip-compressed
+PowerShell source, and `SHA256SUMS.txt`. GitHub also generates its standard
+source ZIP and source tarball.
 
-## Exit codes
-
-| Code | Meaning |
-|---:|---|
-| `0` | Completed successfully |
-| `1` | Fatal bootstrap or configuration error |
-| `2` | One or more selected items failed |
-
-## Architecture
-
-```text
-Install.bat        Standalone bootstrap and local-script entry point
-Install.ps1        Menu, manifest, WinGet bootstrap, and install engine
-tests/             Non-destructive validation
-.github/workflows  Windows PowerShell, PowerShell 7, and release automation
-```
+WinGet verifies installer hashes against its manifests. AEGIS uses exact
+package IDs and explicit WinGet or Microsoft Store sources, retries packages
+independently, and writes its log under `%TEMP%` unless `-LogPath` is supplied.
 
 ## Credit
 
@@ -171,5 +114,5 @@ Conceptually inspired by
 [PC-Gaming-Redists](https://github.com/harryeffinpotter/PC-Gaming-Redists) by
 [`@harryeffinpotter`](https://github.com/harryeffinpotter).
 
-AEGIS is an independent clean-room implementation. It shares no source code
-with PC-Gaming-Redists.
+AEGIS is an independent clean-room implementation and shares no source code
+with PC-Gaming-Redists. Released under the [MIT License](LICENSE).
