@@ -2,7 +2,7 @@
 
 # AEGIS
 
-**One command. Every runtime. Game ready.**
+**One command. The runtimes games expect.**
 
 ![README visits](https://count.getloli.com/@marek-codex.aegis?theme=booru-lewd)
 
@@ -15,9 +15,9 @@
 
 </div>
 
-AEGIS prepares a clean Windows installation for gaming. It installs the
-runtimes older and newer games expect, repairs WinGet when necessary, and shows
-the exact plan before changing anything.
+AEGIS sets up Windows with the shared runtimes many PC games expect. It checks
+what is already installed, repairs WinGet when needed, and shows you the plan
+before making changes.
 
 No debloat presets, registry folklore, launchers, browsers, or mystery tweaks.
 
@@ -44,7 +44,8 @@ runs do not require elevation.
 
 ## Recommended stack
 
-The recommended profile installs 40 items on x64 Windows:
+Recommended installs 40 items on x64 Windows. It covers common game runtimes
+and includes Corretto 25 as the default system JDK:
 
 - Visual C++ 2005, 2008, 2010, 2012, 2013, and current v14, including x86
 - .NET Desktop Runtime 3.1, 5, 6, 7, 8, 9, and 10
@@ -53,16 +54,21 @@ The recommended profile installs 40 items on x64 Windows:
 - NanaZip and current PowerShell
 - Amazon Corretto 25 JDK
 
-Customize also offers Amazon Corretto 21, 17, and 8 JDKs for software that
-requires those Java generations. Minecraft's bundled launcher manages its own
-Java by default; for custom launchers, Java 21 covers Minecraft 1.20.5 through
-1.21.11, Java 17 covers 1.18 through 1.20.4, and older modpacks may require
-Java 8. Install only the versions your games or tools need because multiple
-system JDKs can make the default `java` command ambiguous.
+### Optional compatibility components
 
-The optional Legacy component enables the Windows .NET Framework 3.5 feature
-(including 2.0 and 3.0) for older games and desktop software. Windows may need
-to download feature files through Windows Update.
+Customize can also install Corretto 21, 17, or 8 for applications that need a
+specific Java version. Minecraft's official launcher normally manages Java for
+you. If you use another launcher, Java 21 is used by Minecraft 1.20.5–1.21.11,
+Java 17 by 1.18–1.20.4, and some older versions or modpacks need Java 8. These
+versions are optional because installing several JDKs can make the default
+`java` command unclear.
+
+The optional **Legacy** component enables .NET Framework 3.5, which also
+provides .NET Framework 2.0 and 3.0 for older games and applications. Windows
+may download the feature files through Windows Update.
+
+Anti-cheat software is installed by the game that needs it. Graphics drivers
+provide the Vulkan runtime, so AEGIS does not install a separate Vulkan package.
 
 Arm64 systems receive native packages where they are available. AEGIS installs
 x86 VC++ components on 64-bit Windows because 32-bit games still need them.
@@ -86,6 +92,25 @@ Customize includes a disabled-by-default Power User Workbench:
 Prerelease applications are labeled in the installation plan and are never
 part of Recommended.
 
+## Choose components
+
+Run Customize from the interactive menu, or select components directly:
+
+| Component | Includes |
+| --- | --- |
+| `VC++` | Visual C++ redistributables for x86 and your system architecture |
+| `DotNet` | .NET Desktop runtimes |
+| `AspNet` | ASP.NET Core runtimes |
+| `Gaming` | DirectX, XNA, OpenAL, WebView2, PhysX, and DirectPlay |
+| `Essentials` | NanaZip and current PowerShell |
+| `Java` | Corretto 25, 21, 17, and 8 JDKs |
+| `Legacy` | .NET Framework 3.5 Windows feature |
+| `Workbench` | Optional desktop tools listed above |
+
+Use `-Profile Custom -IncludeGroup` to install only the selected groups. For
+example, `-IncludeGroup Java` installs all four Corretto versions; select
+individual package IDs with `-IncludePackage` when you only need one version.
+
 ## Useful commands
 
 ```powershell
@@ -101,8 +126,11 @@ part of Recommended.
 # Install only the optional Workbench
 .\Install.ps1 -Profile Custom -IncludeGroup Workbench -Unattended
 
-# Install Corretto 21, 17, 25, and 8 for compatibility testing
+# Install every supported Corretto JDK line
 .\Install.ps1 -Profile Custom -IncludeGroup Java -Unattended
+
+# Install only Corretto 21
+.\Install.ps1 -Profile Custom -IncludePackage Amazon.Corretto.21.JDK -Unattended
 
 # Enable .NET Framework 3.5 for legacy applications
 .\Install.ps1 -Profile Custom -IncludeGroup Legacy -Unattended
@@ -111,7 +139,9 @@ part of Recommended.
 .\Install.ps1 -ListPackages
 ```
 
-`Modern`, `Legacy`, and `Full` remain accepted as aliases for `Recommended`.
+`Modern` and `Full` remain accepted as aliases for `Recommended`. `Legacy` is a
+custom component group for .NET Framework 3.5; use `-Profile Full` for the old
+profile alias.
 Exit code `0` means success, `1` means a fatal setup error, and `2` means one or
 more selected items failed.
 
