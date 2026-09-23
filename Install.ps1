@@ -205,11 +205,11 @@ USAGE
   .\Install.ps1 -Profile Recommended -DryRun
 
 PROFILES
-  Recommended  Complete curated gaming prerequisite stack.
+  Recommended  Curated gaming prerequisites plus Corretto 25.
   Custom       Only components/packages supplied explicitly.
 
 CUSTOM COMPONENTS
-  VC++, DotNet, AspNet, Gaming, Essentials, Java, Workbench
+  VC++, DotNet, AspNet, Gaming, Essentials, Java, Legacy, Workbench
 
 COMPATIBILITY
   Modern, Legacy, and Full remain accepted as aliases for Recommended.
@@ -310,6 +310,13 @@ function Get-AegisManifest {
 
         # Java is part of the default gaming/development compatibility stack.
         New-AegisPackage 'Amazon.Corretto.25.JDK' 'Amazon Corretto 25 JDK' 'Java' @('Recommended') @('Java')
+        New-AegisPackage 'Amazon.Corretto.21.JDK' 'Amazon Corretto 21 JDK' 'Java' @() @('Java')
+        New-AegisPackage 'Amazon.Corretto.17.JDK' 'Amazon Corretto 17 JDK' 'Java' @() @('Java')
+        New-AegisPackage 'Amazon.Corretto.8.JDK' 'Amazon Corretto 8 JDK (legacy)' 'Java' @() @('Java')
+
+        # .NET Framework 3.5 covers legacy desktop software and older games.
+        New-AegisPackage 'Windows.NetFx3' '.NET Framework 3.5 (includes 2.0 and 3.0)' `
+            'Legacy Windows Features' @() @('Legacy') 'WindowsFeature' 'NetFx3'
 
         # Optional desktop tools, including explicitly labeled prerelease channels.
         New-AegisPackage -Id 'Devolutions.UniGetUI' -Name 'UniGetUI' `
@@ -386,7 +393,8 @@ function Get-SelectedPackages {
         'Gaming Compatibility'  = 3
         Essentials              = 4
         Java                    = 5
-        'Power User Workbench'  = 6
+        'Legacy Windows Features' = 6
+        'Power User Workbench'  = 7
     }
 
     $architectureOrder = @{
@@ -506,14 +514,15 @@ function Read-MenuChoice {
 }
 
 function Read-CustomComponents {
-    $groups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Workbench')
+    $groups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Legacy', 'Workbench')
     $labels = @(
         'VC++ Redistributables (x86 + native 64-bit)'
         '.NET Desktop Runtimes'
         'ASP.NET Core Runtimes'
         'Gaming Compatibility (DirectX, XNA, OpenAL, WebView2, PhysX, DirectPlay)'
         'Essentials (NanaZip + current PowerShell)'
-        'Java (Amazon Corretto JDK)'
+        'Java (Corretto 25 default; 21, 17, and 8 optional)'
+        '.NET Framework 3.5 [OPTIONAL / LEGACY SUPPORT]'
         'Power User Workbench [OPTIONAL / PRE-RELEASE SOFTWARE]'
     )
     $useInteractiveKeys = $false
@@ -529,7 +538,7 @@ function Read-CustomComponents {
     if ($useInteractiveKeys) {
         $position = 0
         $checked = New-Object 'bool[]' $groups.Count
-        for ($index = 0; $index -lt 6; $index++) {
+        for ($index = 0; $index -lt 7; $index++) {
             $checked[$index] = $true
         }
 
@@ -983,10 +992,10 @@ function Start-AegisElevated {
     }
     else {
         $commandParts = @(
-            '& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing -Uri',
+            '$aegisElevatedScript = (Invoke-RestMethod -UseBasicParsing -Uri',
             (ConvertTo-AegisCommandLiteral -Value $script:AegisSourceUrl),
-            ')))',
-            '-Elevated'
+            '); $aegisElevatedScript = $aegisElevatedScript.TrimStart([char]0xFEFF);',
+            '& ([scriptblock]::Create($aegisElevatedScript)) -Elevated'
         )
     }
 
@@ -1185,7 +1194,7 @@ function Invoke-Aegis {
         $script:ExcludePackage = @($ExcludePackage | ForEach-Object { "$_" -split ',' } |
             ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
-        $validGroups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Workbench')
+        $validGroups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Legacy', 'Workbench')
         foreach ($group in $IncludeGroup) {
             if ($validGroups -notcontains $group) {
                 throw "Unknown component supplied to -IncludeGroup: $group"
@@ -1221,7 +1230,7 @@ function Invoke-Aegis {
                 while ($true) {
                     $action = Read-MenuChoice -Prompt 'WHAT WOULD YOU LIKE TO DO?' `
                         -Choices @(
-                            'Install recommended  // complete 40-item prerequisite stack'
+                            'Install recommended  // gaming prerequisites + Corretto 25'
                             'Customize            // choose component families'
                             'Exit'
                         ) -Default 0

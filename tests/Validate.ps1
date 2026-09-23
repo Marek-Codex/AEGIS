@@ -61,6 +61,8 @@ Assert-True ($installerText -match 'PACKAGE \{0:D2\} / \{1:D2\}') `
     'Per-stage package progress is missing.'
 Assert-True ($installerText -match 'RESTART RECOMMENDED') `
     'Prominent restart guidance is missing.'
+Assert-True ($installerText -match "'WindowsFeature' 'NetFx3'") `
+    '.NET Framework 3.5 is not modeled as an optional Windows feature.'
 Assert-True ($installerText -match 'Administrator request cancelled') `
     'UAC cancellation is not handled cleanly.'
 Assert-True ($batchText -match 'AEGIS-%RANDOM%-%RANDOM%') 'BAT does not use a unique temporary path.'
@@ -83,6 +85,10 @@ foreach ($required in @(
     'Microsoft.PowerShell',
     'CreativeTechnology.OpenAL',
     'Amazon.Corretto.25.JDK',
+    'Amazon.Corretto.21.JDK',
+    'Amazon.Corretto.17.JDK',
+    'Amazon.Corretto.8.JDK',
+    'Windows.NetFx3',
     'Microsoft.DotNet.DesktopRuntime.9',
     'Microsoft.DotNet.DesktopRuntime.8.x86',
     'Microsoft.DotNet.AspNetCore.10'
@@ -192,6 +198,26 @@ Assert-True ($workbenchOutput -match 'Xtreme Download Manager') `
     'Microsoft Store XDM is missing from the Workbench.'
 Assert-True ($workbenchOutput -notmatch 'Amazon Corretto 25 JDK') `
     'Workbench unexpectedly pulls in the recommended prerequisite stack.'
+
+Write-Host 'Checking selectable Corretto versions and legacy .NET feature...'
+$javaOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -File $installer -Profile Custom -IncludeGroup Java -DryRun -Unattended -NoColor 2>&1 |
+    Out-String
+Assert-True ($LASTEXITCODE -eq 0) "Java dry run failed: $javaOutput"
+Assert-True ($javaOutput -match 'INSTALLATION PLAN - 4 ITEMS') `
+    'Java component does not select the four Corretto JDK lines.'
+Assert-True ($javaOutput -match 'Amazon Corretto 21 JDK') 'Corretto 21 is not selectable.'
+Assert-True ($javaOutput -match 'Amazon Corretto 17 JDK') 'Corretto 17 is not selectable.'
+Assert-True ($javaOutput -match 'Amazon Corretto 8 JDK') 'Corretto 8 is not selectable.'
+
+$legacyOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -File $installer -Profile Custom -IncludeGroup Legacy -DryRun -Unattended -NoColor 2>&1 |
+    Out-String
+Assert-True ($LASTEXITCODE -eq 0) "Legacy-feature dry run failed: $legacyOutput"
+Assert-True ($legacyOutput -match 'INSTALLATION PLAN - 1 ITEMS') `
+    '.NET Framework 3.5 should be an independently selectable item.'
+Assert-True ($legacyOutput -match '\.NET Framework 3\.5') `
+    '.NET Framework 3.5 is missing from the legacy component plan.'
 
 Write-Host 'Checking invalid package failure semantics...'
 $invalidOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `

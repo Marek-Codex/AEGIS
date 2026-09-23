@@ -53,6 +53,17 @@ The recommended profile installs 40 items on x64 Windows:
 - NanaZip and current PowerShell
 - Amazon Corretto 25 JDK
 
+Customize also offers Amazon Corretto 21, 17, and 8 JDKs for software that
+requires those Java generations. Minecraft's bundled launcher manages its own
+Java by default; for custom launchers, Java 21 covers Minecraft 1.20.5 through
+1.21.11, Java 17 covers 1.18 through 1.20.4, and older modpacks may require
+Java 8. Install only the versions your games or tools need because multiple
+system JDKs can make the default `java` command ambiguous.
+
+The optional Legacy component enables the Windows .NET Framework 3.5 feature
+(including 2.0 and 3.0) for older games and desktop software. Windows may need
+to download feature files through Windows Update.
+
 Arm64 systems receive native packages where they are available. AEGIS installs
 x86 VC++ components on 64-bit Windows because 32-bit games still need them.
 
@@ -89,6 +100,12 @@ part of Recommended.
 
 # Install only the optional Workbench
 .\Install.ps1 -Profile Custom -IncludeGroup Workbench -Unattended
+
+# Install Corretto 21, 17, 25, and 8 for compatibility testing
+.\Install.ps1 -Profile Custom -IncludeGroup Java -Unattended
+
+# Enable .NET Framework 3.5 for legacy applications
+.\Install.ps1 -Profile Custom -IncludeGroup Legacy -Unattended
 
 # Show the complete manifest
 .\Install.ps1 -ListPackages
