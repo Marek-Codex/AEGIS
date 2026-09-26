@@ -34,6 +34,22 @@ Or download [`Install.bat`](Install.bat). If `Install.ps1` is beside it, the BAT
 uses that copy. Otherwise, it downloads the current script to a temporary
 folder and runs it.
 
+## The menu
+
+Running AEGIS without arguments opens a keyboard-driven menu with three
+choices:
+
+| Choice | What it does |
+| --- | --- |
+| **1  Install recommended** | The curated runtime stack described below |
+| **2  Customize runtimes** | Start from Recommended, then toggle whole families or expand one to pick individual versions |
+| **3  Workbench apps** | Optional desktop tools, kept separate from the runtime stack |
+
+Use the arrow keys (or W/S) and Enter, or press the number to jump straight to
+a choice. In Customize, Space toggles, Right/Left shows or hides the versions in
+a family, and A/N select all or none. Every path ends on a one-screen plan
+where Enter installs and Esc goes back.
+
 AEGIS supports Windows PowerShell 5.1 and PowerShell 7 on Windows 10 and 11.
 Installation asks for administrator access once. Help, package listing, and dry
 runs do not require elevation.
@@ -73,13 +89,15 @@ provide the Vulkan runtime, so AEGIS does not install a separate Vulkan package.
 Arm64 systems receive native packages where they are available. AEGIS installs
 x86 VC++ components on 64-bit Windows because 32-bit games still need them.
 
-Each component family runs on its own progress screen. The final screen lists
-every item as installed, current, planned, or failed and provides the full log
-path. AEGIS never restarts Windows automatically.
+While it runs, AEGIS prints one line per package with its status and how long
+it took, and shows progress in the window title. The final screen sums up each
+family, lists anything that failed along with the reason, and gives the full
+log path; press L to open the log. AEGIS never restarts Windows automatically.
 
 ## Optional Workbench
 
-Customize includes a disabled-by-default Power User Workbench:
+**Workbench apps** in the main menu (or `-IncludeGroup Workbench`) offers a
+separate set of desktop tools. They are never part of Recommended or Customize:
 
 - UniGetUI
 - Everything Beta
@@ -89,12 +107,12 @@ Customize includes a disabled-by-default Power User Workbench:
 - Visual Studio Code Insiders
 - WizTree
 
-Prerelease applications are labeled in the installation plan and are never
-part of Recommended.
+Prerelease applications are labeled `[PRE-RELEASE]` in the picker and the plan.
 
 ## Choose components
 
-Run Customize from the interactive menu, or select components directly:
+Use **Customize runtimes** in the menu, or select components directly from the
+command line:
 
 | Component | Includes |
 | --- | --- |
@@ -142,8 +160,9 @@ individual package IDs with `-IncludePackage` when you only need one version.
 `Modern` and `Full` remain accepted as aliases for `Recommended`. `Legacy` is a
 custom component group for .NET Framework 3.5; use `-Profile Full` for the old
 profile alias.
+
 Exit code `0` means success, `1` means a fatal setup error, and `2` means one or
-more selected items failed.
+more items failed or the elevated run was interrupted.
 
 ## Releases
 
@@ -151,9 +170,15 @@ Each release includes a version-pinned BAT, ZIP, `tar.gz`, gzip-compressed
 PowerShell source, and `SHA256SUMS.txt`. GitHub also generates its standard
 source ZIP and source tarball.
 
-WinGet verifies installer hashes against its manifests. AEGIS uses exact
-package IDs and explicit WinGet or Microsoft Store sources, retries packages
-independently, and writes its log under `%TEMP%` unless `-LogPath` is supplied.
+WinGet verifies installer hashes against its manifests. By default, AEGIS checks
+the latest stable and prerelease versions and picks the higher one, preferring
+prerelease when the versions tie. If prerelease lookup or installation fails,
+AEGIS falls back to stable. Use `-WinGetChannel Stable` to stay on stable, or
+`Preview` to require a prerelease. AEGIS checks the published SHA-256 hashes of
+the WinGet release bundle and dependency archive before installing them. It
+uses exact package IDs and explicit WinGet or Microsoft Store sources, retries
+packages independently, and writes its log under `%TEMP%` unless `-LogPath` is
+supplied.
 
 ## Credit
 

@@ -78,7 +78,8 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: .github/release-notes/${{ github.ref_name }}.md
           files: |
             AEGIS-${{ github.ref_name }}.bat
             AEGIS-${{ github.ref_name }}.zip

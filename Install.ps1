@@ -25,7 +25,7 @@ param(
     [string[]]$ExcludePackage = @(),
 
     [ValidateSet('Stable', 'Preview', 'Newest')]
-    [string]$WinGetChannel = 'Stable',
+    [string]$WinGetChannel = 'Newest',
 
     [switch]$Unattended,
     [switch]$DryRun,
@@ -50,7 +50,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $script:AegisBoundParameters = @{} + $PSBoundParameters
 
-$script:AegisVersion = '0.2.0'
+$script:AegisVersion = '0.3.0'
 $script:AegisSourceUrl = 'https://github.com/Marek-Codex/AEGIS/raw/refs/heads/main/Install.ps1'
 $script:RunningFromFile = -not [string]::IsNullOrWhiteSpace($PSCommandPath)
 $script:RebootRequired = $false
@@ -159,6 +159,18 @@ function Write-Aegis {
 }
 
 function Show-AegisHeader {
+    param([switch]$Compact)
+
+    $rule = Get-AegisGlyph Rule
+    if ($Compact) {
+        Write-Host ''
+        Write-Aegis ('  AEGIS {0}  /  AUTOMATED ESSENTIALS FOR GAMING INSTALLATION SYSTEM' -f
+            $script:AegisVersion) -Style Secondary -SkipLog
+        Write-Aegis ('  ' + ($rule * 62)) -Style Accent -SkipLog
+        Write-Host ''
+        return
+    }
+
     $logo = @'
 .s5SSSs.  .s5SSSs.  .s5SSSs.  s.  .s5SSSs.
       SS.       SS.       SS. SS.       SS.
@@ -184,7 +196,6 @@ SS    ;,. SS    ;,. SS    ;,. ;,. .,;   ;,.
         }
     }
     $architecture = if ([Environment]::Is64BitOperatingSystem) { '64-BIT WINDOWS' } else { '32-BIT WINDOWS' }
-    $rule = if ($script:UseUnicode) { [string][char]0x2501 } else { '=' }
     Write-Host ''
     Write-Aegis '  AUTOMATED ESSENTIALS FOR GAMING INSTALLATION SYSTEM' -Style Muted -SkipLog
     Write-Aegis ('  AEGIS {0}  /  POWERSHELL {1}  /  {2}' -f `
@@ -198,31 +209,37 @@ function Show-AegisHelp {
 AEGIS - Automated Essentials for Gaming Installation System
 
 USAGE
-  .\Install.ps1
-  .\Install.ps1 -Profile Recommended -Unattended
+  .\Install.ps1                                   Interactive menu
+  .\Install.ps1 -Profile Recommended -Unattended  Recommended stack, no prompts
+  .\Install.ps1 -Profile Recommended -DryRun      Preview without changing Windows
   .\Install.ps1 -Profile Custom -IncludeGroup VC++,DotNet,AspNet
-  .\Install.ps1 -Profile Custom -IncludePackage Microsoft.DirectX
-  .\Install.ps1 -Profile Recommended -DryRun
+  .\Install.ps1 -Profile Custom -IncludePackage Amazon.Corretto.21.JDK
+  .\Install.ps1 -ListPackages                     Show every package ID
 
-PROFILES
-  Recommended  Curated gaming prerequisites plus Corretto 25.
-  Custom       Only components/packages supplied explicitly.
+MENU
+  1  Install recommended   The curated runtime stack plus Corretto 25.
+  2  Customize runtimes    Toggle families or expand them to pick versions.
+  3  Workbench apps        Optional desktop tools, kept apart from runtimes.
 
-CUSTOM COMPONENTS
+COMPONENTS (-IncludeGroup)
   VC++, DotNet, AspNet, Gaming, Essentials, Java, Legacy, Workbench
 
-COMPATIBILITY
-  Modern, Legacy, and Full remain accepted as aliases for Recommended.
+OPTIONS
+  -ExcludePackage <id>     Remove specific package IDs from a selection.
+  -Force                   Reinstall packages that are already present.
+  -RetryCount <1-10>       Attempts per package (default 3).
+  -WinGetChannel <name>    Newest (default), Stable, or Preview.
+  -SkipWinGetUpdate        Use the installed WinGet without checking for updates.
+  -LogPath <path>          Write the log somewhere other than %TEMP%.
+  -NoColor                 Plain output for logs and old consoles.
 
-WINGET CHANNELS
-  Stable   GitHub's latest stable WinGet release.
-  Preview  Most recently published WinGet prerelease.
-  Newest   Most recently published release, stable or prerelease.
+COMPATIBILITY
+  Modern and Full remain accepted as aliases for -Profile Recommended.
 
 EXIT CODES
   0  Completed successfully.
   1  Fatal bootstrap or configuration error.
-  2  One or more selected items failed.
+  2  Items failed, or elevated setup was interrupted.
 '@ | Write-Host
 }
 
@@ -316,7 +333,7 @@ function Get-AegisManifest {
 
         # .NET Framework 3.5 covers legacy desktop software and older games.
         New-AegisPackage 'Windows.NetFx3' '.NET Framework 3.5 (includes 2.0 and 3.0)' `
-            'Legacy Windows Features' @() @('Legacy') 'WindowsFeature' 'NetFx3'
+            'Legacy Windows' @() @('Legacy') 'WindowsFeature' 'NetFx3'
 
         # Optional desktop tools, including explicitly labeled prerelease channels.
         New-AegisPackage -Id 'Devolutions.UniGetUI' -Name 'UniGetUI' `
@@ -336,6 +353,17 @@ function Get-AegisManifest {
             -Category 'Power User Workbench' -Groups @('Workbench')
     )
 }
+
+$script:AegisGroups = @(
+    [pscustomobject]@{ Key = 'VC++'; Label = 'Visual C++ Redistributables'; Hint = '2005 through v14, x86 plus native 64-bit' }
+    [pscustomobject]@{ Key = 'DotNet'; Label = '.NET Desktop Runtimes'; Hint = '3.1 through 10' }
+    [pscustomobject]@{ Key = 'AspNet'; Label = 'ASP.NET Core Runtimes'; Hint = '2.1 through 10' }
+    [pscustomobject]@{ Key = 'Gaming'; Label = 'Gaming Compatibility'; Hint = 'DirectX, XNA, OpenAL, WebView2, PhysX, DirectPlay' }
+    [pscustomobject]@{ Key = 'Essentials'; Label = 'Essentials'; Hint = 'NanaZip and current PowerShell' }
+    [pscustomobject]@{ Key = 'Java'; Label = 'Java (Amazon Corretto)'; Hint = '25 by default; 21, 17 and 8 for launchers or modpacks that need them' }
+    [pscustomobject]@{ Key = 'Legacy'; Label = '.NET Framework 3.5'; Hint = 'Legacy Windows feature; also provides 2.0 and 3.0' }
+    [pscustomobject]@{ Key = 'Workbench'; Label = 'Power User Workbench'; Hint = 'Optional desktop tools; some are pre-release builds' }
+)
 
 function Get-NativeArchitecture {
     if ($env:PROCESSOR_ARCHITEW6432) {
@@ -393,7 +421,7 @@ function Get-SelectedPackages {
         'Gaming Compatibility'  = 3
         Essentials              = 4
         Java                    = 5
-        'Legacy Windows Features' = 6
+        'Legacy Windows' = 6
         'Power User Workbench'  = 7
     }
 
@@ -403,82 +431,145 @@ function Get-SelectedPackages {
         arm64 = 2
     }
 
+    # Pad numbers so versions sort naturally: 3.1, 5, ... 10 rather than 10, 3.1, 5.
     return @($selected | Sort-Object `
         @{ Expression = { $categoryOrder[$_.Category] } }, `
-        @{ Expression = { $_.Name -replace ' \((x86|x64|Arm64)\)$', '' } }, `
+        @{ Expression = {
+            [regex]::Replace(($_.Name -replace ' \((x86|x64|Arm64)\)$', ''), '\d+',
+                { param($match) $match.Value.PadLeft(5, '0') })
+        } }, `
         @{ Expression = { $architectureOrder[$_.Architecture] } }, Name -Unique)
+}
+
+function Get-AegisGlyph {
+    param([string]$Name)
+
+    if ($script:UseUnicode) {
+        switch ($Name) {
+            'Cursor' { return [string][char]0x25B8 }
+            'Ok' { return [string][char]0x2713 }
+            'Fail' { return [string][char]0x2717 }
+            'Pending' { return [string][char]0x2022 }
+            'Dot' { return [string][char]0x00B7 }
+            'Rule' { return [string][char]0x2501 }
+        }
+    }
+
+    switch ($Name) {
+        'Cursor' { return '>' }
+        'Ok' { return '+' }
+        'Fail' { return 'x' }
+        'Pending' { return '.' }
+        'Dot' { return '/' }
+        'Rule' { return '=' }
+    }
+}
+
+function Test-AegisKeyInput {
+    try {
+        return -not [Console]::IsInputRedirected -and
+            -not [Console]::IsOutputRedirected -and
+            [Console]::WindowWidth -ge 40
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-AegisWidth {
+    try {
+        if (-not [Console]::IsOutputRedirected) {
+            return [Math]::Max(60, [Math]::Min(110, [Console]::WindowWidth - 1))
+        }
+    }
+    catch {
+        # Fall through to a fixed width for hosts without a console window.
+    }
+    return 100
+}
+
+function Reset-AegisScreen {
+    param([switch]$Compact)
+
+    if (-not [Console]::IsOutputRedirected) {
+        try {
+            [Console]::Clear()
+        }
+        catch {
+            # Hosts without a clearable buffer simply keep scrolling.
+        }
+    }
+    Show-AegisHeader -Compact:$Compact
+}
+
+function Get-KeyDigit {
+    param([ConsoleKeyInfo]$Key)
+
+    if ([char]::IsDigit($Key.KeyChar)) {
+        return [int]::Parse([string]$Key.KeyChar)
+    }
+    return -1
+}
+
+function Get-AegisShortName {
+    param([object]$Package)
+
+    # Category headings already say what these are; keep only the part that differs.
+    $name = $Package.Name
+    foreach ($prefix in @(
+        '^Microsoft Visual C\+\+ ',
+        '^Microsoft \.NET Desktop Runtime ',
+        '^Microsoft ASP\.NET Core Runtime ',
+        '^Amazon Corretto '
+    )) {
+        $name = $name -replace $prefix, ''
+    }
+    return $name -replace ' Redistributable', ''
 }
 
 function Read-MenuChoice {
     param(
         [string]$Prompt,
-        [string[]]$Choices,
+        [object[]]$Choices,
         [int]$Default = 0
     )
 
-    $useInteractiveKeys = $false
-    try {
-        $useInteractiveKeys = -not [Console]::IsInputRedirected -and
-            -not [Console]::IsOutputRedirected -and
-            [Console]::WindowWidth -ge 30
-    }
-    catch {
-        $useInteractiveKeys = $false
-    }
-
-    if ($useInteractiveKeys) {
+    if (Test-AegisKeyInput) {
         $position = $Default
-
         try {
             [Console]::CursorVisible = $false
             while ($true) {
-                [Console]::Clear()
-                Show-AegisHeader
-                $width = [Math]::Max(29, [Math]::Min(68, [Console]::WindowWidth - 2))
+                Reset-AegisScreen
                 Write-Aegis ('  {0}' -f $Prompt) -Style Accent -SkipLog
-                Write-Host ''
-                for ($index = 0; $index -lt $Choices.Count; $index++) {
-                    $activeMarker = if ($script:UseUnicode) { [string][char]0x25B8 } else { '>' }
-                    $prefix = if ($index -eq $position) { '  ' + $activeMarker } else { '   ' }
-                    $style = if ($index -eq $position) { 'Secondary' } else { 'Normal' }
-                    $parts = @($Choices[$index] -split '\s+//\s+', 2)
-                    Write-Aegis ('{0}  {1:D2}  {2}' -f $prefix, ($index + 1), $parts[0].ToUpperInvariant()) `
-                        -Style $style -SkipLog
-                    if ($parts.Count -gt 1) {
-                        Write-Aegis ('          {0}' -f $parts[1]) -Style Muted -SkipLog
-                    }
-                    if ($index -lt ($Choices.Count - 1)) {
-                        Write-Host ''
-                    }
+                if ($DryRun) {
+                    Write-Aegis '  PREVIEW MODE  /  NOTHING WILL BE INSTALLED' -Style Warning -SkipLog
                 }
                 Write-Host ''
-                Write-Aegis '  UP/DOWN  MOVE     ENTER  SELECT     0  CANCEL' -Style Muted -SkipLog
+
+                for ($index = 0; $index -lt $Choices.Count; $index++) {
+                    $active = $index -eq $position
+                    $prefix = if ($active) { '  ' + (Get-AegisGlyph Cursor) } else { '   ' }
+                    $style = if ($active) { 'Secondary' } else { 'Normal' }
+                    Write-Aegis ('{0} {1}  {2}' -f $prefix, ($index + 1), $Choices[$index].Label.ToUpperInvariant()) `
+                        -Style $style -SkipLog
+                    Write-Aegis ('       {0}' -f $Choices[$index].Hint) -Style Muted -SkipLog
+                    Write-Host ''
+                }
+
+                Write-Aegis ('  UP/DOWN  MOVE     ENTER  SELECT     1-{0}  QUICK PICK     ESC  EXIT' -f
+                    $Choices.Count) -Style Muted -SkipLog
 
                 $key = [Console]::ReadKey($true)
+                $digit = Get-KeyDigit -Key $key
+                if ($digit -ge 1 -and $digit -le $Choices.Count) {
+                    return $digit - 1
+                }
+
                 switch ($key.Key) {
-                    'UpArrow' { $position = ($position - 1 + $Choices.Count) % $Choices.Count }
-                    'W' { $position = ($position - 1 + $Choices.Count) % $Choices.Count }
-                    'DownArrow' { $position = ($position + 1) % $Choices.Count }
-                    'S' { $position = ($position + 1) % $Choices.Count }
-                    'Enter' {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                        return $Choices[$position]
-                    }
-                    'D0' {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                        return $null
-                    }
-                    'NumPad0' {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                        return $null
-                    }
-                    default {
-                        Write-Aegis '  Unrecognized key.'.PadRight($width) -Style Warning -SkipLog
-                        Start-Sleep -Milliseconds 500
-                    }
+                    { $_ -in 'UpArrow', 'W', 'K' } { $position = ($position - 1 + $Choices.Count) % $Choices.Count }
+                    { $_ -in 'DownArrow', 'S', 'J' } { $position = ($position + 1) % $Choices.Count }
+                    'Enter' { return $position }
+                    { $_ -in 'Escape', 'Q', 'D0', 'NumPad0' } { return -1 }
                 }
             }
         }
@@ -487,166 +578,262 @@ function Read-MenuChoice {
         }
     }
 
-    Write-Aegis $Prompt -Style Accent
+    Write-Aegis $Prompt -Style Accent -SkipLog
     for ($index = 0; $index -lt $Choices.Count; $index++) {
-        $marker = if ($index -eq $Default) { '*' } else { ' ' }
-        Write-Aegis ('  [{0}] {1} {2}' -f ($index + 1), $marker, $Choices[$index]) -Style Normal
+        Write-Aegis ('  [{0}] {1}  -  {2}' -f ($index + 1), $Choices[$index].Label, $Choices[$index].Hint) -SkipLog
     }
-    Write-Aegis '  [0]   Cancel' -Style Normal
+    Write-Aegis '  [0] Exit' -SkipLog
     while ($true) {
         $answer = Read-Host ('Select [{0}]' -f ($Default + 1))
         if ([string]::IsNullOrWhiteSpace($answer)) {
-            return $Choices[$Default]
+            return $Default
         }
 
+        $number = 0
+        if ([int]::TryParse($answer.Trim(), [ref]$number) -and
+            $number -ge 0 -and $number -le $Choices.Count) {
+            return $number - 1
+        }
+        Write-Aegis 'Invalid selection.' -Style Warning -SkipLog
+    }
+}
+
+function Read-PackagePicker {
+    param(
+        [string]$Title,
+        [object[]]$Manifest,
+        [string[]]$Groups,
+        [string[]]$DefaultIds = @(),
+        [switch]$ExpandAll
+    )
+
+    $groupDefs = @($script:AegisGroups | Where-Object { $Groups -contains $_.Key })
+    $packagesByGroup = @{}
+    $allPackages = New-Object System.Collections.Generic.List[object]
+    foreach ($group in $groupDefs) {
+        $members = @(Get-SelectedPackages -Manifest $Manifest -SelectedProfile 'Custom' `
+            -Groups @($group.Key) -ExplicitPackages @() -ExcludedPackages @())
+        $packagesByGroup[$group.Key] = $members
+        foreach ($member in $members) {
+            $allPackages.Add($member)
+        }
+    }
+
+    $checked = @{}
+    $expanded = @{}
+    foreach ($package in $allPackages) {
+        $checked[$package.Id] = $DefaultIds -contains $package.Id
+    }
+    foreach ($group in $groupDefs) {
+        $expanded[$group.Key] = [bool]$ExpandAll
+    }
+
+    if (-not (Test-AegisKeyInput)) {
+        Write-Aegis $Title -Style Accent -SkipLog
+        for ($index = 0; $index -lt $groupDefs.Count; $index++) {
+            Write-Aegis ('  [{0}] {1}  -  {2}' -f ($index + 1), $groupDefs[$index].Label, $groupDefs[$index].Hint) -SkipLog
+        }
+        Write-Aegis 'Enter comma-separated numbers, 0 to go back, or press Enter for the defaults.' -Style Muted -SkipLog
+        $answer = Read-Host 'Select'
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            return ,@($allPackages | Where-Object { $checked[$_.Id] } | ForEach-Object { $_.Id })
+        }
         if ($answer.Trim() -eq '0') {
             return $null
         }
 
-        $number = 0
-        if ([int]::TryParse($answer, [ref]$number) -and
-            $number -ge 1 -and $number -le $Choices.Count) {
-            return $Choices[$number - 1]
-        }
-
-        Write-Aegis 'Invalid selection.' -Style Warning
-    }
-}
-
-function Read-CustomComponents {
-    $groups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Legacy', 'Workbench')
-    $labels = @(
-        'VC++ Redistributables (x86 + native 64-bit)'
-        '.NET Desktop Runtimes'
-        'ASP.NET Core Runtimes'
-        'Gaming Compatibility (DirectX, XNA, OpenAL, WebView2, PhysX, DirectPlay)'
-        'Essentials (NanaZip + current PowerShell)'
-        'Java (Corretto 25 default; 21, 17, and 8 optional)'
-        '.NET Framework 3.5 [OPTIONAL / LEGACY SUPPORT]'
-        'Power User Workbench [OPTIONAL / PRE-RELEASE SOFTWARE]'
-    )
-    $useInteractiveKeys = $false
-    try {
-        $useInteractiveKeys = -not [Console]::IsInputRedirected -and
-            -not [Console]::IsOutputRedirected -and
-            [Console]::WindowWidth -ge 40
-    }
-    catch {
-        $useInteractiveKeys = $false
-    }
-
-    if ($useInteractiveKeys) {
-        $position = 0
-        $checked = New-Object 'bool[]' $groups.Count
-        for ($index = 0; $index -lt 7; $index++) {
-            $checked[$index] = $true
-        }
-
-        try {
-            [Console]::CursorVisible = $false
-            while ($true) {
-                [Console]::Clear()
-                Show-AegisHeader
-                $selectedCount = @($checked | Where-Object { $_ }).Count
-                Write-Aegis '  CUSTOM DEPLOYMENT' -Style Accent -SkipLog
-                Write-Aegis ('  {0} OF {1} COMPONENT FAMILIES ARMED' -f $selectedCount, $groups.Count) `
-                    -Style Muted -SkipLog
-                Write-Host ''
-
-                for ($index = 0; $index -lt $groups.Count; $index++) {
-                    $cursor = if ($index -eq $position) {
-                        if ($script:UseUnicode) { [string][char]0x25B8 } else { '>' }
-                    }
-                    else { ' ' }
-                    $mark = if ($checked[$index]) { '+' } else { '-' }
-                    $style = if ($index -eq $position) { 'Secondary' } else { 'Normal' }
-                    Write-Aegis ('  {0}  [{1}]  {2}' -f $cursor, $mark, $labels[$index]) `
-                        -Style $style -SkipLog
-                }
-
-                Write-Host ''
-                Write-Aegis '  UP/DOWN  MOVE     SPACE  TOGGLE     ENTER  CONTINUE' -Style Muted -SkipLog
-                Write-Aegis '  A  ALL            N  NONE         0  BACK' -Style Muted -SkipLog
-
-                $key = [Console]::ReadKey($true)
-                switch ($key.Key) {
-                    'UpArrow' { $position = ($position - 1 + $groups.Count) % $groups.Count }
-                    'W' { $position = ($position - 1 + $groups.Count) % $groups.Count }
-                    'DownArrow' { $position = ($position + 1) % $groups.Count }
-                    'S' { $position = ($position + 1) % $groups.Count }
-                    'Spacebar' { $checked[$position] = -not $checked[$position] }
-                    'A' {
-                        for ($index = 0; $index -lt $checked.Count; $index++) {
-                            $checked[$index] = $true
-                        }
-                    }
-                    'N' {
-                        for ($index = 0; $index -lt $checked.Count; $index++) {
-                            $checked[$index] = $false
-                        }
-                    }
-                    'Enter' {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                        $selected = New-Object System.Collections.Generic.List[string]
-                        for ($index = 0; $index -lt $groups.Count; $index++) {
-                            if ($checked[$index]) {
-                                $selected.Add($groups[$index])
-                            }
-                        }
-                        return ,$selected.ToArray()
-                    }
-                    'D0' {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                        return $null
-                    }
-                    'NumPad0' {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                        return $null
-                    }
-                    default {
-                        Write-Aegis '  Unrecognized key.'.PadRight($width) -Style Warning -SkipLog
-                        Start-Sleep -Milliseconds 500
-                    }
+        $ids = New-Object System.Collections.Generic.List[string]
+        foreach ($token in ($answer -split ',')) {
+            $number = 0
+            if (-not [int]::TryParse($token.Trim(), [ref]$number) -or
+                $number -lt 1 -or $number -gt $groupDefs.Count) {
+                throw "Invalid component selection: $token"
+            }
+            foreach ($package in $packagesByGroup[$groupDefs[$number - 1].Key]) {
+                if (-not $ids.Contains($package.Id)) {
+                    $ids.Add($package.Id)
                 }
             }
         }
-        finally {
-            [Console]::CursorVisible = $true
+        return ,$ids.ToArray()
+    }
+
+    $position = 0
+    $notice = ''
+    try {
+        [Console]::CursorVisible = $false
+        while ($true) {
+            $rows = New-Object System.Collections.Generic.List[object]
+            foreach ($group in $groupDefs) {
+                $rows.Add([pscustomobject]@{ Group = $group; Package = $null })
+                if ($expanded[$group.Key]) {
+                    foreach ($package in $packagesByGroup[$group.Key]) {
+                        $rows.Add([pscustomobject]@{ Group = $group; Package = $package })
+                    }
+                }
+            }
+            $position = [Math]::Min($position, $rows.Count - 1)
+
+            # The full logo needs about 15 lines; drop to the one-line header
+            # rather than scrolling the list off a small window.
+            $compact = $false
+            try {
+                $compact = [Console]::WindowHeight -lt ($rows.Count + 24)
+            }
+            catch {
+                $compact = $false
+            }
+            Reset-AegisScreen -Compact:$compact
+
+            $selectedCount = @($allPackages | Where-Object { $checked[$_.Id] }).Count
+            Write-Aegis ('  {0}' -f $Title) -Style Accent -SkipLog
+            Write-Aegis ('  {0} OF {1} ITEMS SELECTED' -f $selectedCount, $allPackages.Count) -Style Muted -SkipLog
+            Write-Host ''
+
+            for ($index = 0; $index -lt $rows.Count; $index++) {
+                $row = $rows[$index]
+                $active = $index -eq $position
+                $cursor = if ($active) { Get-AegisGlyph Cursor } else { ' ' }
+
+                if ($null -eq $row.Package) {
+                    $members = $packagesByGroup[$row.Group.Key]
+                    $on = @($members | Where-Object { $checked[$_.Id] }).Count
+                    $box = if ($on -eq $members.Count) { '[x]' } elseif ($on -gt 0) { '[~]' } else { '[ ]' }
+                    $fold = if ($expanded[$row.Group.Key]) { '-' } else { '+' }
+                    $style = if ($active) { 'Secondary' } elseif ($on -gt 0) { 'Normal' } else { 'Muted' }
+                    Write-Aegis ('  {0} {1} {2} {3,-32} {4,5}' -f $cursor, $box, $fold, $row.Group.Label,
+                        ('{0}/{1}' -f $on, $members.Count)) -Style $style -SkipLog
+                    if ($active -and -not $expanded[$row.Group.Key]) {
+                        Write-Aegis ('          {0}' -f $row.Group.Hint) -Style Muted -SkipLog
+                    }
+                }
+                else {
+                    $box = if ($checked[$row.Package.Id]) { '[x]' } else { '[ ]' }
+                    $style = if ($active) { 'Secondary' } elseif ($checked[$row.Package.Id]) { 'Normal' } else { 'Muted' }
+                    Write-Aegis ('  {0}       {1} {2}' -f $cursor, $box, $row.Package.Name) -Style $style -SkipLog
+                }
+            }
+
+            Write-Host ''
+            if ($notice) {
+                Write-Aegis ('  {0}' -f $notice) -Style Warning -SkipLog
+                $notice = ''
+            }
+            Write-Aegis '  UP/DOWN  MOVE     SPACE  TOGGLE     RIGHT/LEFT  SHOW/HIDE VERSIONS' -Style Muted -SkipLog
+            Write-Aegis '  A  ALL     N  NONE     ENTER  REVIEW PLAN     ESC  BACK' -Style Muted -SkipLog
+
+            $key = [Console]::ReadKey($true)
+            $row = $rows[$position]
+            switch ($key.Key) {
+                { $_ -in 'UpArrow', 'W', 'K' } { $position = ($position - 1 + $rows.Count) % $rows.Count }
+                { $_ -in 'DownArrow', 'S', 'J' } { $position = ($position + 1) % $rows.Count }
+                { $_ -in 'RightArrow', 'L' } { $expanded[$row.Group.Key] = $true }
+                { $_ -in 'LeftArrow', 'H' } {
+                    $expanded[$row.Group.Key] = $false
+                    for ($index = 0; $index -lt $rows.Count; $index++) {
+                        if ($null -eq $rows[$index].Package -and $rows[$index].Group.Key -eq $row.Group.Key) {
+                            $position = $index
+                            break
+                        }
+                    }
+                }
+                'Spacebar' {
+                    if ($null -eq $row.Package) {
+                        $members = $packagesByGroup[$row.Group.Key]
+                        $allOn = @($members | Where-Object { $checked[$_.Id] }).Count -eq $members.Count
+                        foreach ($member in $members) {
+                            $checked[$member.Id] = -not $allOn
+                        }
+                    }
+                    else {
+                        $checked[$row.Package.Id] = -not $checked[$row.Package.Id]
+                    }
+                }
+                'A' {
+                    foreach ($package in $allPackages) {
+                        $checked[$package.Id] = $true
+                    }
+                }
+                'N' {
+                    foreach ($package in $allPackages) {
+                        $checked[$package.Id] = $false
+                    }
+                }
+                'Enter' {
+                    $ids = @($allPackages | Where-Object { $checked[$_.Id] } | ForEach-Object { $_.Id })
+                    if ($ids.Count -gt 0) {
+                        return ,$ids
+                    }
+                    $notice = 'Select at least one item.'
+                }
+                { $_ -in 'Escape', 'Backspace', 'D0', 'NumPad0' } { return $null }
+            }
+        }
+    }
+    finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
+function Read-AegisSelection {
+    param([object[]]$Manifest)
+
+    $recommendedIds = @(Get-SelectedPackages -Manifest $Manifest -SelectedProfile 'Recommended' `
+        -Groups @() -ExplicitPackages @() -ExcludedPackages @() | ForEach-Object { $_.Id })
+    $runtimeGroups = @($script:AegisGroups | Where-Object { $_.Key -ne 'Workbench' } | ForEach-Object { $_.Key })
+
+    while ($true) {
+        $ids = $null
+        $choice = Read-MenuChoice -Prompt 'WHAT WOULD YOU LIKE TO DO?' -Choices @(
+            [pscustomobject]@{
+                Label = 'Install recommended'
+                Hint  = '{0} items: VC++, .NET, DirectX, XNA, PhysX, OpenAL, Java 25 and more' -f $recommendedIds.Count
+            }
+            [pscustomobject]@{
+                Label = 'Customize runtimes'
+                Hint  = 'Pick families or individual versions; add Java 8-21 or .NET 3.5'
+            }
+            [pscustomobject]@{
+                Label = 'Workbench apps'
+                Hint  = 'Optional desktop tools, kept separate from the runtime stack'
+            }
+        )
+
+        switch ($choice) {
+            0 { return ,$recommendedIds }
+            1 {
+                $ids = Read-PackagePicker -Title 'CUSTOMIZE RUNTIMES' -Manifest $Manifest `
+                    -Groups $runtimeGroups -DefaultIds $recommendedIds
+            }
+            2 {
+                $workbenchIds = @($Manifest | Where-Object { $_.Groups -contains 'Workbench' } | ForEach-Object { $_.Id })
+                $ids = Read-PackagePicker -Title 'WORKBENCH APPS' -Manifest $Manifest `
+                    -Groups @('Workbench') -DefaultIds $workbenchIds -ExpandAll
+            }
+            default { return $null }
+        }
+
+        if ($null -ne $ids) {
+            return ,$ids
+        }
+    }
+}
+
+function Read-PlanConfirmation {
+    $action = if ($DryRun) { 'RUN PREVIEW' } else { 'INSTALL' }
+    if (Test-AegisKeyInput) {
+        Write-Aegis ('  ENTER  {0}     ESC  BACK' -f $action) -Style Muted -SkipLog
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                { $_ -in 'Enter', 'Y' } { return $true }
+                { $_ -in 'Escape', 'Backspace', 'N', 'D0', 'NumPad0' } { return $false }
+            }
         }
     }
 
-    Write-Aegis 'CUSTOMIZE' -Style Accent
-    for ($index = 0; $index -lt $groups.Count; $index++) {
-        $defaultMarker = if ($index -lt 5) { ' [default]' } else { '' }
-        Write-Aegis ('  [{0}] {1}{2}' -f ($index + 1), $labels[$index], $defaultMarker)
-    }
-    Write-Aegis '  [0] Back to profile selection' -Style Normal
-    Write-Aegis 'Enter comma-separated numbers, 0 to go back, or press Enter for defaults.' -Style Muted
-    $answer = Read-Host 'Select'
-
-    if ([string]::IsNullOrWhiteSpace($answer)) {
-        return ,$groups[0..4]
-    }
-
-    if ($answer.Trim() -eq '0') {
-        return $null
-    }
-
-    $selected = New-Object System.Collections.Generic.List[string]
-    foreach ($token in ($answer -split ',')) {
-        $number = 0
-        if (-not [int]::TryParse($token.Trim(), [ref]$number) -or
-            $number -lt 1 -or $number -gt $groups.Count) {
-            throw "Invalid component selection: $token"
-        }
-        if (-not $selected.Contains($groups[$number - 1])) {
-            $selected.Add($groups[$number - 1])
-        }
-    }
-    return ,$selected.ToArray()
+    $confirmation = Read-Host 'Continue? [Y/n]'
+    return $confirmation -notmatch '^[Nn]'
 }
 
 function Test-WinGet {
@@ -672,14 +859,7 @@ function ConvertTo-VersionNumber {
 function Get-WinGetRelease {
     param([string]$Channel)
 
-    $headers = @{
-        'User-Agent' = 'AEGIS-Windows-Gaming-Installer'
-        'Accept' = 'application/vnd.github+json'
-    }
-
-    if ($env:GITHUB_TOKEN) {
-        $headers.Authorization = 'Bearer {0}' -f $env:GITHUB_TOKEN
-    }
+    $headers = Get-WinGetGitHubHeaders
 
     if ($Channel -eq 'Stable') {
         return Invoke-RestMethod `
@@ -699,6 +879,56 @@ function Get-WinGetRelease {
         throw "No WinGet release matched channel '$Channel'."
     }
     return $eligible[0]
+}
+
+function Get-WinGetGitHubHeaders {
+    $headers = @{
+        'User-Agent' = 'AEGIS-Windows-Gaming-Installer'
+        'Accept' = 'application/vnd.github+json'
+    }
+
+    if ($env:GITHUB_TOKEN) {
+        $headers.Authorization = 'Bearer {0}' -f $env:GITHUB_TOKEN
+    }
+
+    return $headers
+}
+
+function Get-WinGetReleasePair {
+    param([hashtable]$Headers)
+
+    $releases = @(Invoke-RestMethod `
+        -Uri 'https://api.github.com/repos/microsoft/winget-cli/releases?per_page=30' `
+        -Headers $Headers -UseBasicParsing)
+    $stable = @($releases | Where-Object { -not $_.draft -and -not $_.prerelease } |
+        Sort-Object { [datetime]$_.published_at } -Descending | Select-Object -First 1)
+    $preview = @($releases | Where-Object { -not $_.draft -and $_.prerelease } |
+        Sort-Object { [datetime]$_.published_at } -Descending | Select-Object -First 1)
+
+    if (-not $stable -and -not $preview) {
+        throw 'GitHub returned no published WinGet releases.'
+    }
+    return [pscustomobject]@{
+        Stable = if ($stable) { $stable[0] } else { $null }
+        Preview = if ($preview) { $preview[0] } else { $null }
+    }
+}
+
+function Assert-ReleaseAssetHash {
+    param(
+        [object]$Release,
+        [object]$Asset,
+        [string]$Path
+    )
+
+    if ($Asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
+        throw "WinGet release asset '$($Asset.name)' has no published SHA-256 digest."
+    }
+    $expected = $Matches[1]
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if ($actual -ine $expected) {
+        throw "SHA-256 verification failed for WinGet release asset '$($Asset.name)' in release '$($Release.tag_name)'."
+    }
 }
 
 function Get-ReleaseAsset {
@@ -763,6 +993,8 @@ function Install-WinGetRelease {
         Write-Aegis ('Downloading WinGet {0}...' -f $Release.tag_name) -Style Accent
         Save-RemoteFile -Uri $bundleAsset.browser_download_url -Destination $bundlePath
         Save-RemoteFile -Uri $dependencyAsset.browser_download_url -Destination $dependencyZip
+        Assert-ReleaseAssetHash -Release $Release -Asset $bundleAsset -Path $bundlePath
+        Assert-ReleaseAssetHash -Release $Release -Asset $dependencyAsset -Path $dependencyZip
         Expand-Archive -LiteralPath $dependencyZip -DestinationPath $dependencyRoot -Force
 
         Assert-MicrosoftSignature -Path $bundlePath
@@ -809,7 +1041,24 @@ function Ensure-WinGet {
     }
 
     try {
-        $release = Get-WinGetRelease -Channel $Channel
+        if ($Channel -eq 'Newest') {
+            try {
+                $pair = Get-WinGetReleasePair -Headers (Get-WinGetGitHubHeaders)
+            }
+            catch {
+                Write-Aegis ('WinGet prerelease lookup failed; trying the latest stable release. {0}' -f
+                    $_.Exception.Message) -Style Warning
+                $pair = [pscustomobject]@{ Stable = (Get-WinGetRelease -Channel Stable); Preview = $null }
+            }
+            $release = if (-not $pair.Preview) { $pair.Stable }
+                elseif (-not $pair.Stable) { $pair.Preview }
+                elseif ((ConvertTo-VersionNumber -Value $pair.Preview.tag_name) -ge
+                    (ConvertTo-VersionNumber -Value $pair.Stable.tag_name)) { $pair.Preview }
+                else { $pair.Stable }
+        }
+        else {
+            $release = Get-WinGetRelease -Channel $Channel
+        }
         $releaseVersion = ConvertTo-VersionNumber -Value $release.tag_name
 
         if ($working) {
@@ -824,7 +1073,38 @@ function Ensure-WinGet {
             }
         }
 
-        Install-WinGetRelease -Release $release
+        try {
+            Install-WinGetRelease -Release $release
+        }
+        catch {
+            if ($Channel -eq 'Newest' -and $release.prerelease -and $pair.Stable) {
+                Write-Aegis ('WinGet prerelease {0} could not be installed; falling back to stable {1}. {2}' -f
+                    $release.tag_name, $pair.Stable.tag_name, $_.Exception.Message) -Style Warning
+                $release = $pair.Stable
+                if ($working) {
+                    $installedText = ((& winget --version) | Out-String).Trim()
+                    if ((ConvertTo-VersionNumber -Value $installedText) -ge
+                        (ConvertTo-VersionNumber -Value $release.tag_name)) {
+                        Write-Aegis 'Installed WinGet is at least as new as the stable release.' -Style Success
+                        return
+                    }
+                }
+                try {
+                    Install-WinGetRelease -Release $release
+                }
+                catch {
+                    Write-Aegis ('Stable WinGet fallback {0} failed; continuing with installed version. {1}' -f
+                        $release.tag_name, $_.Exception.Message) -Style Warning
+                    if ($working) {
+                        return
+                    }
+                    throw
+                }
+            }
+            else {
+                throw
+            }
+        }
     }
     catch {
         if ($working) {
@@ -891,7 +1171,6 @@ function Install-WinGetPackage {
     )
 
     if ($DryRun) {
-        Write-Aegis ('  PLAN  {0}' -f $Package.Name) -Style Accent
         Add-AegisResult -Package $Package -Status Planned
         return
     }
@@ -917,7 +1196,7 @@ function Install-WinGetPackage {
     }
 
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        Write-Aegis ('  [{0}/{1}] {2}' -f $attempt, $Attempts, $Package.Name) -Style Accent
+        Write-AegisLog -Message ('winget {0} {1} (attempt {2}/{3})' -f $operation, $Package.Id, $attempt, $Attempts)
         $output = & winget @arguments 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
         Add-Content -LiteralPath $script:LogPath -Value $output -Encoding UTF8
@@ -931,7 +1210,6 @@ function Install-WinGetPackage {
             -1978335153
         )
         if ($noChangeExitCodes -contains $exitCode) {
-            Write-Aegis ('  CURRENT  {0}' -f $Package.Name) -Style Muted
             Add-AegisResult -Package $Package -Status Current -ExitCode $exitCode
             return
         }
@@ -939,7 +1217,6 @@ function Install-WinGetPackage {
         if ($exitCode -eq 0 -or $exitCode -eq 3010) {
             # 3010 is ERROR_SUCCESS_REBOOT_REQUIRED: the install succeeded but needs a restart.
             $script:RebootRequired = $script:RebootRequired -or ($exitCode -eq 3010)
-            Write-Aegis ('  DONE  {0}' -f $Package.Name) -Style Success
             Add-AegisResult -Package $Package -Status Installed -ExitCode $exitCode
             return
         }
@@ -965,7 +1242,6 @@ function Install-WinGetPackage {
     if ($lastLine) {
         $detail += ': ' + $lastLine
     }
-    Write-Aegis ('  FAILED  {0}' -f $Package.Name) -Style Failure
     Add-AegisResult -Package $Package -Status Failed -ExitCode $exitCode -Detail $detail
 }
 
@@ -985,6 +1261,24 @@ function ConvertTo-AegisCommandLiteral {
     return "'{0}'" -f ("$Value" -replace "'", "''")
 }
 
+function Format-AegisArguments {
+    # Show -Profile, the documented alias, rather than the internal parameter name.
+    $parts = @($script:AegisBoundParameters.GetEnumerator() |
+        ForEach-Object { [pscustomobject]@{ Key = ($_.Key -replace '^AegisProfile$', 'Profile'); Value = $_.Value } } |
+        Sort-Object Key | ForEach-Object {
+            if ($_.Value -is [System.Management.Automation.SwitchParameter]) {
+                '-{0}' -f $_.Key
+            }
+            else {
+                '-{0} {1}' -f $_.Key, (@($_.Value) -join ',')
+            }
+        })
+    if ($parts.Count -eq 0) {
+        return '(none)'
+    }
+    return $parts -join ' '
+}
+
 function Start-AegisElevated {
     $enginePath = (Get-Process -Id $PID).Path
     if ($script:RunningFromFile) {
@@ -999,7 +1293,11 @@ function Start-AegisElevated {
         )
     }
 
-    foreach ($entry in $script:AegisBoundParameters.GetEnumerator()) {
+    # Share one log with the elevated window so this window can point at it afterwards.
+    $forwarded = @{} + $script:AegisBoundParameters
+    $forwarded['LogPath'] = $script:LogPath
+
+    foreach ($entry in $forwarded.GetEnumerator()) {
         if ($entry.Key -eq 'Elevated') {
             continue
         }
@@ -1022,7 +1320,8 @@ function Start-AegisElevated {
 
     $command = $commandParts -join ' '
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    Write-Aegis 'Administrator access is required once for the complete installation.' -Style Warning
+    Show-AegisHeader
+    Write-Aegis '  Administrator access is required once. AEGIS continues in a new window.' -Style Warning
     try {
         $process = Start-Process -FilePath $enginePath -Verb RunAs -Wait -PassThru `
             -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded)
@@ -1035,19 +1334,32 @@ function Start-AegisElevated {
             0
         }
         if ($nativeErrorCode -eq 1223 -or $_.Exception.Message -match 'cancel') {
-            Write-Aegis 'Administrator request cancelled. No installation was started.' -Style Warning
+            Write-Aegis '  Administrator request cancelled. No installation was started.' -Style Warning
             return 0
         }
         throw
     }
-    return $process.ExitCode
+
+    $exitCode = $process.ExitCode
+    switch ($exitCode) {
+        0 { Write-Aegis '  AEGIS finished successfully.' -Style Success }
+        2 { Write-Aegis '  AEGIS finished, but one or more items failed.' -Style Warning }
+        -1073741510 {
+            Write-Aegis '  Elevated AEGIS was interrupted or its window was closed. Installation may be incomplete; run AEGIS again to continue.' -Style Warning
+            return 2
+        }
+        default { Write-Aegis ('  AEGIS stopped with exit code {0}.' -f $exitCode) -Style Failure }
+    }
+    if (Test-Path -LiteralPath $script:LogPath) {
+        Write-Aegis ('  LOG  {0}' -f $script:LogPath) -Style Muted
+    }
+    return $exitCode
 }
 
 function Install-WindowsFeaturePackage {
     param([object]$Package)
 
     if ($DryRun) {
-        Write-Aegis ('  PLAN  {0}' -f $Package.Name) -Style Accent
         Add-AegisResult -Package $Package -Status Planned
         return
     }
@@ -1059,7 +1371,6 @@ function Install-WindowsFeaturePackage {
 
         $feature = Get-WindowsOptionalFeature -Online -FeatureName $Package.FeatureName
         if ($feature.State -eq 'Enabled') {
-            Write-Aegis ('  CURRENT  {0}' -f $Package.Name) -Style Muted
             Add-AegisResult -Package $Package -Status Current
             return
         }
@@ -1069,11 +1380,9 @@ function Install-WindowsFeaturePackage {
         if ($result.RestartNeeded) {
             $script:RebootRequired = $true
         }
-        Write-Aegis ('  DONE  {0}' -f $Package.Name) -Style Success
         Add-AegisResult -Package $Package -Status Installed
     }
     catch {
-        Write-Aegis ('  FAILED  {0}' -f $Package.Name) -Style Failure
         Add-AegisResult -Package $Package -Status Failed -ExitCode 1 -Detail $_.Exception.Message
     }
 }
@@ -1081,57 +1390,181 @@ function Install-WindowsFeaturePackage {
 function Show-InstallationPlan {
     param([object[]]$Packages)
 
-    Write-Aegis ('INSTALLATION PLAN - {0} ITEMS' -f $Packages.Count) -Style Accent
-    $currentCategory = ''
-    foreach ($package in $Packages) {
-        if ($package.Category -ne $currentCategory) {
-            $currentCategory = $package.Category
-            Write-Aegis ('  {0}' -f $currentCategory.ToUpperInvariant()) -Style Secondary
+    Write-Aegis ('  INSTALLATION PLAN - {0} ITEMS' -f $Packages.Count) -Style Accent
+    Write-Host ''
+
+    $width = Get-AegisWidth
+    $separator = ' {0} ' -f (Get-AegisGlyph Dot)
+    $categories = @($Packages | Select-Object -ExpandProperty Category -Unique)
+    foreach ($category in $categories) {
+        $members = @($Packages | Where-Object { $_.Category -eq $category })
+        $label = '  {0,-22}{1,3}   ' -f $category.ToUpperInvariant(), $members.Count
+        $indent = ' ' * $label.Length
+
+        $lines = New-Object System.Collections.Generic.List[string]
+        $current = ''
+        foreach ($member in $members) {
+            Write-AegisLog -Message ('PLAN  {0}  [{1}]' -f $member.Name, $member.Id)
+            $chip = Get-AegisShortName -Package $member
+            $candidate = if ($current) { $current + $separator + $chip } else { $chip }
+            if ($current -and ($label.Length + $candidate.Length) -gt $width) {
+                $lines.Add($current)
+                $current = $chip
+            }
+            else {
+                $current = $candidate
+            }
         }
-        Write-Aegis ('    {0}' -f $package.Name)
+        $lines.Add($current)
+
+        Write-Aegis $label -Style Secondary -NoNewline -SkipLog
+        Write-Aegis $lines[0] -SkipLog
+        for ($index = 1; $index -lt $lines.Count; $index++) {
+            Write-Aegis ($indent + $lines[$index]) -SkipLog
+        }
     }
     Write-Host ''
 }
 
+function Format-AegisDuration {
+    param([TimeSpan]$Duration)
+
+    if ($Duration.TotalMinutes -ge 1) {
+        return '{0}m {1:D2}s' -f [int][Math]::Floor($Duration.TotalMinutes), $Duration.Seconds
+    }
+    return '{0}s' -f [int][Math]::Ceiling($Duration.TotalSeconds)
+}
+
+function Set-AegisTitle {
+    param([string]$Text)
+
+    if ([Console]::IsOutputRedirected) {
+        return
+    }
+    try {
+        $Host.UI.RawUI.WindowTitle = $Text
+    }
+    catch {
+        # The window title is cosmetic.
+    }
+}
+
+function Invoke-AegisDeployment {
+    param([object[]]$Packages)
+
+    $live = -not [Console]::IsOutputRedirected
+    $total = $Packages.Count
+    $digits = ([string]$total).Length
+    $currentCategory = ''
+    $index = 0
+
+    foreach ($package in $Packages) {
+        $index++
+        if ($package.Category -ne $currentCategory) {
+            $currentCategory = $package.Category
+            Write-Host ''
+            Write-Aegis ('  {0}' -f $currentCategory.ToUpperInvariant()) -Style Secondary
+        }
+
+        $counter = '{0}/{1}' -f ([string]$index).PadLeft($digits, '0'), $total
+        $shortName = Get-AegisShortName -Package $package
+        Set-AegisTitle -Text ('AEGIS  {0}  {1}' -f $counter, $package.Name)
+
+        $pending = '  {0}  {1}  {2,-44} WORKING' -f (Get-AegisGlyph Pending), $counter, $shortName
+        if ($live) {
+            Write-Aegis $pending -Style Muted -NoNewline -SkipLog
+        }
+
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        if ($package.Kind -eq 'WindowsFeature') {
+            Install-WindowsFeaturePackage -Package $package
+        }
+        else {
+            Install-WinGetPackage -Package $package -ForceInstall:$Force -Attempts $RetryCount
+        }
+        $timer.Stop()
+
+        $result = $script:Results[$script:Results.Count - 1]
+        $glyph = if ($result.Status -eq 'Failed') { Get-AegisGlyph Fail } else { Get-AegisGlyph Ok }
+        $style = switch ($result.Status) {
+            'Installed' { 'Success' }
+            'Failed' { 'Failure' }
+            default { 'Muted' }
+        }
+        $line = '  {0}  {1}  {2,-44} {3,-9} {4}' -f $glyph, $counter, $shortName,
+            $result.Status.ToUpperInvariant(), (Format-AegisDuration -Duration $timer.Elapsed)
+
+        if ($live) {
+            Write-Host "`r" -NoNewline
+            $line = $line.PadRight($pending.Length)
+        }
+        Write-Aegis $line -Style $style
+        if ($result.Status -eq 'Failed' -and $result.Detail) {
+            Write-Aegis ('         {0}' -f $result.Detail) -Style Failure
+        }
+    }
+}
+
 function Show-Summary {
+    param([TimeSpan]$Elapsed)
+
     $counts = @{}
     foreach ($status in @('Installed', 'Current', 'Skipped', 'Failed', 'Planned')) {
         $counts[$status] = @($script:Results | Where-Object { $_.Status -eq $status }).Count
     }
 
-    $interactiveDisplay = -not $Unattended -and -not [Console]::IsOutputRedirected
-    if ($interactiveDisplay) {
-        [Console]::Clear()
-        Show-AegisHeader
+    if (-not $Unattended -and -not [Console]::IsOutputRedirected) {
+        Reset-AegisScreen
     }
     else {
         Write-Host ''
     }
 
-    Write-Aegis '  DEPLOYMENT COMPLETE' -Style Accent
-    Write-Aegis ('  {0} INSTALLED  /  {1} CURRENT  /  {2} FAILED' -f `
-        $counts.Installed, $counts.Current, $counts.Failed) `
-        -Style $(if ($counts.Failed) { 'Warning' } else { 'Success' })
+    if ($counts.Planned -gt 0) {
+        Write-Aegis '  PREVIEW COMPLETE' -Style Accent
+        Write-Aegis ('  {0} ITEMS PLANNED  /  NOTHING WAS CHANGED' -f $counts.Planned) -Style Success
+    }
+    else {
+        Write-Aegis '  DEPLOYMENT COMPLETE' -Style Accent
+        Write-Aegis ('  {0} INSTALLED  /  {1} CURRENT  /  {2} FAILED  /  {3}' -f
+            $counts.Installed, $counts.Current, $counts.Failed, (Format-AegisDuration -Duration $Elapsed)) `
+            -Style $(if ($counts.Failed) { 'Warning' } else { 'Success' })
+    }
+    Write-Host ''
 
-    $currentCategory = ''
-    foreach ($result in $script:Results) {
-        if ($result.Category -ne $currentCategory) {
-            $currentCategory = $result.Category
-            Write-Host ''
-            Write-Aegis ('  {0}' -f $currentCategory.ToUpperInvariant()) -Style Secondary
+    $categories = @($script:Results | Select-Object -ExpandProperty Category -Unique)
+    foreach ($category in $categories) {
+        $members = @($script:Results | Where-Object { $_.Category -eq $category })
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($status in @('Installed', 'Current', 'Planned', 'Failed')) {
+            $count = @($members | Where-Object { $_.Status -eq $status }).Count
+            if ($count -gt 0) {
+                $parts.Add(('{0} {1}' -f $count, $status.ToLowerInvariant()))
+            }
         }
+        $style = if (@($members | Where-Object { $_.Status -eq 'Failed' }).Count) {
+            'Failure'
+        }
+        elseif (@($members | Where-Object { $_.Status -eq 'Installed' }).Count) {
+            'Success'
+        }
+        else {
+            'Muted'
+        }
+        Write-Aegis ('  {0,-24}{1}' -f $category.ToUpperInvariant(), ($parts -join ', ')) -Style $style
+    }
 
-        $statusStyle = switch ($result.Status) {
-            'Installed' { 'Success' }
-            'Failed' { 'Failure' }
-            'Planned' { 'Accent' }
-            default { 'Muted' }
+    $failed = @($script:Results | Where-Object { $_.Status -eq 'Failed' })
+    if ($failed.Count -gt 0) {
+        Write-Host ''
+        Write-Aegis '  NEEDS ATTENTION' -Style Failure
+        foreach ($result in $failed) {
+            Write-Aegis ('    {0}  {1}' -f (Get-AegisGlyph Fail), $result.Name) -Style Failure
+            if ($result.Detail) {
+                Write-Aegis ('       {0}' -f $result.Detail) -Style Muted
+            }
         }
-        Write-Aegis ('    {0,-9} {1}' -f $result.Status.ToUpperInvariant(), $result.Name) `
-            -Style $statusStyle
-        if ($result.Status -eq 'Failed' -and $result.Detail) {
-            Write-Aegis ('              {0}' -f $result.Detail) -Style Failure
-        }
+        Write-Aegis '  Run AEGIS again to retry; items that are already current are skipped quickly.' -Style Muted
     }
 
     if ($script:RebootRequired) {
@@ -1143,23 +1576,47 @@ function Show-Summary {
     Write-Aegis ('  FULL LOG  {0}' -f $script:LogPath) -Style Muted
 }
 
-function Show-FinalLog {
+function Show-LogTail {
+    param([int]$Lines = 15)
+
     if (-not (Test-Path -LiteralPath $script:LogPath)) {
         return
     }
 
-    $lines = @(Get-Content -LiteralPath $script:LogPath)
-    $maxLines = 300
-    $shown = if ($lines.Count -gt $maxLines) { $lines[($lines.Count - $maxLines)..($lines.Count - 1)] } else { $lines }
-
     Write-Host ''
-    Write-Aegis ('FINAL INSTALL LOG ({0})' -f $script:LogPath) -Style Accent -SkipLog
-    if ($lines.Count -gt $maxLines) {
-        Write-Aegis ('  ...showing last {0} of {1} lines...' -f $maxLines, $lines.Count) -Style Muted -SkipLog
-    }
-    foreach ($line in $shown) {
+    Write-Aegis ('  LAST {0} LOG LINES' -f $Lines) -Style Accent -SkipLog
+    foreach ($line in @(Get-Content -LiteralPath $script:LogPath -Tail $Lines)) {
         Write-Aegis ('  {0}' -f $line) -Style Muted -SkipLog
     }
+}
+
+function Read-NextAction {
+    if (Test-AegisKeyInput) {
+        Write-Host ''
+        Write-Aegis '  ENTER  EXIT     M  MAIN MENU     L  OPEN LOG' -Style Muted -SkipLog
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                { $_ -in 'Enter', 'Escape', 'Q' } { return 'Exit' }
+                'M' { return 'Menu' }
+                'L' {
+                    try {
+                        Start-Process -FilePath 'notepad.exe' -ArgumentList ('"{0}"' -f $script:LogPath)
+                    }
+                    catch {
+                        Write-Aegis '  Could not open the log.' -Style Warning -SkipLog
+                    }
+                }
+            }
+        }
+    }
+
+    Write-Host ''
+    $answer = Read-Host '  ENTER  EXIT     M  MAIN MENU'
+    if ("$answer".Trim() -match '^[Mm]$') {
+        return 'Menu'
+    }
+    return 'Exit'
 }
 
 function Invoke-Aegis {
@@ -1181,8 +1638,7 @@ function Invoke-Aegis {
         }
 
         Write-AegisLog -Message ('AEGIS {0} started. Arguments: {1}' -f
-            $script:AegisVersion, ($MyInvocation.Line)) -Level INFO
-        Show-AegisHeader
+            $script:AegisVersion, (Format-AegisArguments)) -Level INFO
 
         # PowerShell's native executable boundary can deliver comma-separated
         # values as one string even when the parameter type is string[]. Make
@@ -1194,10 +1650,11 @@ function Invoke-Aegis {
         $script:ExcludePackage = @($ExcludePackage | ForEach-Object { "$_" -split ',' } |
             ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
-        $validGroups = @('VC++', 'DotNet', 'AspNet', 'Gaming', 'Essentials', 'Java', 'Legacy', 'Workbench')
+        $validGroups = @($script:AegisGroups | ForEach-Object { $_.Key })
         foreach ($group in $IncludeGroup) {
             if ($validGroups -notcontains $group) {
-                throw "Unknown component supplied to -IncludeGroup: $group"
+                throw ('Unknown component supplied to -IncludeGroup: {0}. Valid components: {1}' -f
+                    $group, ($validGroups -join ', '))
             }
         }
 
@@ -1215,8 +1672,13 @@ function Invoke-Aegis {
             $script:AegisProfile = 'Recommended'
         }
 
+        $interactive = -not $Unattended -and $AegisProfile -eq 'Interactive'
+        if (-not $interactive) {
+            Show-AegisHeader
+        }
+
         if ($AegisProfile -in @('Modern', 'Legacy', 'Full')) {
-            Write-Aegis ('Profile {0} is now an alias for Recommended.' -f $AegisProfile) `
+            Write-Aegis ('  Profile {0} is now an alias for Recommended.' -f $AegisProfile) `
                 -Style Muted
             $script:AegisProfile = 'Recommended'
         }
@@ -1224,139 +1686,72 @@ function Invoke-Aegis {
         $sessionHadFailure = $false
 
         while ($true) {
-            $selected = @()
+            if ($interactive) {
+                $ids = Read-AegisSelection -Manifest $manifest
+                if ($null -eq $ids) {
+                    Write-Aegis '  Cancelled. Nothing was changed.' -Style Warning
+                    return $(if ($sessionHadFailure) { 2 } else { 0 })
+                }
+                $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile 'Custom' `
+                    -Groups @() -ExplicitPackages $ids -ExcludedPackages $ExcludePackage)
 
-            if (-not $Unattended -and $AegisProfile -eq 'Interactive') {
-                while ($true) {
-                    $action = Read-MenuChoice -Prompt 'WHAT WOULD YOU LIKE TO DO?' `
-                        -Choices @(
-                            'Install recommended  // gaming prerequisites + Corretto 25'
-                            'Customize            // choose component families'
-                            'Exit'
-                        ) -Default 0
-                    if ($null -eq $action -or $action -eq 'Exit') {
-                        Write-Aegis 'Cancelled.' -Style Warning
-                        return 0
-                    }
-
-                    if ($action -like 'Install recommended*') {
-                        $script:AegisProfile = 'Recommended'
-                        $script:IncludeGroup = @()
-                    }
-                    else {
-                        $script:AegisProfile = 'Custom'
-                        $chosenGroups = Read-CustomComponents
-                        if ($null -eq $chosenGroups) {
-                            $script:AegisProfile = 'Interactive'
-                            continue
-                        }
-                        $script:IncludeGroup = @($chosenGroups)
-                    }
-
-                    $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $AegisProfile `
-                        -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
-                        -ExcludedPackages $ExcludePackage)
-
-                    if ($selected.Count -gt 0) {
-                        break
-                    }
-
-                    Write-Aegis 'Select at least one component. Choose again.' `
-                        -Style Warning
+                Reset-AegisScreen
+                Show-InstallationPlan -Packages $selected
+                if (-not (Read-PlanConfirmation)) {
+                    continue
                 }
             }
             else {
                 $selected = @(Get-SelectedPackages -Manifest $manifest -SelectedProfile $AegisProfile `
                     -Groups $IncludeGroup -ExplicitPackages $IncludePackage `
                     -ExcludedPackages $ExcludePackage)
-            }
-
-            if ($selected.Count -eq 0) {
-                throw 'No packages were selected. Custom profile requires -IncludeGroup and/or -IncludePackage.'
-            }
-
-            Show-InstallationPlan -Packages $selected
-
-            if (-not $Unattended -and -not $DryRun) {
-                $confirmation = Read-Host 'Continue? [Y/n]'
-                if ($confirmation -match '^[Nn]') {
-                    Write-Aegis 'Cancelled.' -Style Warning
+                if ($selected.Count -eq 0) {
+                    throw 'No packages were selected. Custom profile requires -IncludeGroup and/or -IncludePackage.'
+                }
+                Show-InstallationPlan -Packages $selected
+                if (-not $Unattended -and -not $DryRun -and -not (Read-PlanConfirmation)) {
+                    Write-Aegis '  Cancelled. Nothing was changed.' -Style Warning
                     return 0
                 }
             }
 
+            $timer = [Diagnostics.Stopwatch]::StartNew()
             if ($DryRun) {
-                Write-Aegis 'Dry run: no system changes will be made.' -Style Warning
+                Write-Aegis '  Dry run: no system changes will be made.' -Style Warning
+                foreach ($package in $selected) {
+                    Add-AegisResult -Package $package -Status Planned
+                }
             }
             else {
+                if ($interactive) {
+                    Reset-AegisScreen
+                }
                 Ensure-WinGet -Channel $WinGetChannel -SkipUpdate:$SkipWinGetUpdate
+                Invoke-AegisDeployment -Packages $selected
             }
+            $timer.Stop()
+            Set-AegisTitle -Text 'AEGIS'
 
-            $categories = @($selected | Select-Object -ExpandProperty Category -Unique)
-            $stageNumber = 0
-            $packageNumber = 0
-            $packagesInStage = 0
-            $currentCategory = ''
-            foreach ($package in $selected) {
-                if ($package.Category -ne $currentCategory) {
-                    $currentCategory = $package.Category
-                    $stageNumber++
-                    $packageNumber = 0
-                    $packagesInStage = @($selected | Where-Object { $_.Category -eq $currentCategory }).Count
-                    if (-not $Unattended -and -not [Console]::IsOutputRedirected) {
-                        [Console]::Clear()
-                        Show-AegisHeader
-                    }
-                    else {
-                        Write-Host ''
-                    }
-                    Write-Aegis ('  STAGE {0:D2} / {1:D2}' -f $stageNumber, $categories.Count) `
-                        -Style Muted
-                    Write-Aegis ('  {0}' -f $currentCategory.ToUpperInvariant()) -Style Secondary
-                    Write-Host ''
-                }
-
-                $packageNumber++
-                Write-Aegis ('  PACKAGE {0:D2} / {1:D2}' -f $packageNumber, $packagesInStage) `
-                    -Style Muted
-
-                if ($package.Kind -eq 'WindowsFeature') {
-                    Install-WindowsFeaturePackage -Package $package
-                }
-                else {
-                    Install-WinGetPackage -Package $package -ForceInstall:$Force -Attempts $RetryCount
-                }
-            }
-
-            Show-Summary
+            Show-Summary -Elapsed $timer.Elapsed
             $failureCount = @($script:Results | Where-Object { $_.Status -eq 'Failed' }).Count
             if ($failureCount -gt 0) {
                 $sessionHadFailure = $true
             }
 
-            if ($Unattended) {
-                Show-FinalLog
-                return $(if ($failureCount -gt 0) { 2 } else { 0 })
-            }
-
-            Write-Host ''
-            $nextAction = Read-Host '  ENTER  EXIT     M  MAIN MENU'
-            if ($nextAction.Trim() -notmatch '^[Mm]$') {
+            if (-not $interactive -or (Read-NextAction) -ne 'Menu') {
                 return $(if ($sessionHadFailure) { 2 } else { 0 })
             }
 
             $script:Results = New-Object System.Collections.Generic.List[object]
             $script:RebootRequired = $false
-            $script:AegisProfile = 'Interactive'
-            $script:IncludeGroup = @()
         }
     }
     catch {
         try {
-            Write-Aegis ('FATAL  {0}' -f $_.Exception.Message) -Style Failure
+            Write-Aegis ('  FATAL  {0}' -f $_.Exception.Message) -Style Failure
             Write-AegisLog -Message $_.ScriptStackTrace -Level ERROR
-            Write-Aegis ('Log: {0}' -f $script:LogPath) -Style Muted
-            Show-FinalLog
+            Show-LogTail
+            Write-Aegis ('  FULL LOG  {0}' -f $script:LogPath) -Style Muted
         }
         catch {
             Write-Error $_

@@ -26,6 +26,18 @@ $errors = $null
 )
 Assert-True ($errors.Count -eq 0) (($errors | ForEach-Object Message) -join '; ')
 
+function Invoke-AegisDryRun {
+    param([string[]]$Arguments)
+
+    $logPath = Join-Path ([IO.Path]::GetTempPath()) ('AEGIS-validate-{0}.log' -f [guid]::NewGuid().ToString('N'))
+    $output = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
+        -File $installer @Arguments -DryRun -Unattended -NoColor -LogPath $logPath 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+    $log = if (Test-Path -LiteralPath $logPath) { Get-Content -Raw -LiteralPath $logPath } else { '' }
+    Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+    return [pscustomobject]@{ Output = $output; Log = $log; ExitCode = $exitCode }
+}
+
 Write-Host 'Checking required files...'
 Assert-True (Test-Path -LiteralPath $batch) 'Install.bat is missing.'
 Assert-True (Test-Path -LiteralPath $readme) 'README.md is missing.'
@@ -57,19 +69,39 @@ Assert-True ($installerText -match '\[Console\]::BackgroundColor = \[ConsoleColo
     'Interactive elevated consoles are not normalized to the AEGIS black background.'
 Assert-True ($installerText -match "Read-Host '  ENTER  EXIT     M  MAIN MENU'") `
     'Completion screen does not preserve its results while prompting for the next action.'
-Assert-True ($installerText -match 'PACKAGE \{0:D2\} / \{1:D2\}') `
-    'Per-stage package progress is missing.'
+Assert-True ($installerText -match 'WORKING') 'Live per-package progress line is missing.'
+Assert-True ($installerText -notmatch 'function Show-FinalLog') `
+    'The full log is dumped to the console again; show its path instead.'
 Assert-True ($installerText -match 'RESTART RECOMMENDED') `
     'Prominent restart guidance is missing.'
+Assert-True ($installerText.Contains("[string]`$WinGetChannel = 'Newest'")) `
+    'WinGet does not default to the newest stable-or-preview release.'
+Assert-True ($installerText -match 'Assert-ReleaseAssetHash') `
+    'WinGet bootstrap does not verify the published SHA-256 digests.'
+Assert-True ($installerText -match 'prerelease lookup failed; trying the latest stable release') `
+    'WinGet does not fall back to stable if prerelease discovery fails.'
 Assert-True ($installerText -match "'WindowsFeature' 'NetFx3'") `
     '.NET Framework 3.5 is not modeled as an optional Windows feature.'
 Assert-True ($installerText -match 'Administrator request cancelled') `
     'UAC cancellation is not handled cleanly.'
+Assert-True ($installerText -match 'Elevated AEGIS was interrupted or its window was closed') `
+    'Closing or interrupting the elevated window is not reported clearly.'
+Assert-True ($installerText -match 'Items failed, or elevated setup was interrupted') `
+    'Built-in help does not explain the elevated interruption exit code.'
+Assert-True ($readmeText -match 'more items failed or the elevated run was interrupted') `
+    'README exit-code guidance does not explain the elevated interruption case.'
 Assert-True ($batchText -match 'AEGIS-%RANDOM%-%RANDOM%') 'BAT does not use a unique temporary path.'
 
+$releaseVersionMatch = [regex]::Match($installerText, '\$script:AegisVersion = ''(?<version>\d+\.\d+\.\d+)''')
+Assert-True ($releaseVersionMatch.Success) 'Installer release version could not be identified.'
+$releaseNotesPath = Join-Path $root ('.github\release-notes\v{0}.md' -f $releaseVersionMatch.Groups['version'].Value)
+Assert-True (Test-Path -LiteralPath $releaseNotesPath) 'Release notes for the installer version are missing.'
+
 Write-Host 'Checking pinned GitHub Actions...'
-$workflowText = (Get-Content -Raw (Join-Path $root '.github\workflows\validate.yml')) +
-    (Get-Content -Raw (Join-Path $root '.github\workflows\release.yml'))
+$releaseWorkflow = Get-Content -Raw (Join-Path $root '.github\workflows\release.yml')
+Assert-True ($releaseWorkflow -match 'body_path: \.github/release-notes/\$\{\{ github\.ref_name \}\}\.md') `
+    'Release workflow does not publish the notes for its tag.'
+$workflowText = (Get-Content -Raw (Join-Path $root '.github\workflows\validate.yml')) + $releaseWorkflow
 $actionLines = @($workflowText -split "`r?`n" | Where-Object { $_ -match '^\s+uses:' })
 Assert-True ($actionLines.Count -eq 4) 'Unexpected GitHub Action count.'
 foreach ($line in $actionLines) {
@@ -147,77 +179,86 @@ Assert-True ($bomOutput -match 'IEX_RETURNED=0') `
     "The one-liner's BOM-stripping guard did not survive a simulated leading BOM: $bomOutput"
 
 Write-Host 'Running non-destructive Recommended dry run...'
-$dryRunOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File $installer -Profile Recommended -DryRun -Unattended -NoColor 2>&1 |
-    Out-String
-Assert-True ($LASTEXITCODE -eq 0) "Dry run failed: $dryRunOutput"
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Recommended')
+$dryRunOutput = $run.Output
+$dryRunLog = $run.Log
+Assert-True ($run.ExitCode -eq 0) "Dry run failed: $dryRunOutput"
 Assert-True ($dryRunOutput -match 'Dry run: no system changes') 'Dry-run notice is missing.'
-Assert-True ($dryRunOutput -match 'NanaZip') 'NanaZip was not selected.'
-Assert-True ($dryRunOutput -match 'PowerShell') 'Current PowerShell was not selected.'
-Assert-True ($dryRunOutput -match 'ASP.NET Core Runtime 10') 'ASP.NET runtime was not selected.'
-Assert-True ($dryRunOutput -match 'Microsoft Visual C\+\+ 2005 Redistributable \(x86\)') `
+Assert-True ($dryRunOutput -match 'INSTALLATION PLAN - 40 ITEMS') 'Recommended selection count changed.'
+Assert-True ($dryRunOutput -match '40 ITEMS PLANNED') 'Preview summary is missing.'
+Assert-True (@($dryRunOutput -split "`r?`n").Count -lt 80) 'Recommended dry run output is no longer compact.'
+Assert-True ($dryRunLog -match 'NanaZip') 'NanaZip was not selected.'
+Assert-True ($dryRunLog -match '\[Microsoft\.PowerShell\]') 'Current PowerShell was not selected.'
+Assert-True ($dryRunLog -match 'ASP.NET Core Runtime 10') 'ASP.NET runtime was not selected.'
+Assert-True ($dryRunLog -match 'Microsoft Visual C\+\+ 2005 Redistributable \(x86\)') `
     'x86 VC++ runtime was not selected on x64 Windows.'
-Assert-True ($dryRunOutput.IndexOf('Microsoft Visual C++ 2005 Redistributable (x86)') -lt `
-    $dryRunOutput.IndexOf('Microsoft Visual C++ 2005 Redistributable (x64)')) `
+Assert-True ($dryRunLog.IndexOf('Microsoft Visual C++ 2005 Redistributable (x86)') -lt `
+    $dryRunLog.IndexOf('Microsoft Visual C++ 2005 Redistributable (x64)')) `
     'VC++ 2005 x86 must precede x64 to avoid WinGet package identity conflicts.'
-Assert-True ($dryRunOutput -match 'Amazon Corretto 25 JDK') `
+Assert-True ($dryRunLog.IndexOf('Desktop Runtime 3.1') -lt $dryRunLog.IndexOf('Desktop Runtime 10')) `
+    'Runtime versions are not sorted numerically.'
+Assert-True ($dryRunLog -match 'Amazon Corretto 25 JDK') `
     'Recommended selection does not include the default Java runtime.'
-Assert-True ($dryRunOutput -match 'INSTALLATION PLAN - 40 ITEMS') `
-    'Recommended selection count changed.'
-Assert-True ($dryRunOutput -notmatch 'Microsoft Visual C\+\+ v14 Redistributable \(Arm64\)') `
+Assert-True ($dryRunLog -notmatch 'Microsoft Visual C\+\+ v14 Redistributable \(Arm64\)') `
     'Architecture filtering selected Arm64 on an x64 test host.'
+Assert-True ($dryRunLog -match 'Arguments: -DryRun -LogPath \S+ -NoColor -Profile Recommended -Unattended') `
+    'The log does not record the supplied arguments.'
 
 Write-Host 'Checking backwards-compatible Full alias...'
-$fullOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File $installer -Profile Full -DryRun -Unattended -NoColor 2>&1 | Out-String
-Assert-True ($LASTEXITCODE -eq 0) "Full dry run failed: $fullOutput"
-Assert-True ($fullOutput -match 'Profile Full is now an alias for Recommended') `
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Full')
+Assert-True ($run.ExitCode -eq 0) "Full dry run failed: $($run.Output)"
+Assert-True ($run.Output -match 'Profile Full is now an alias for Recommended') `
     'Full compatibility alias notice is missing.'
-Assert-True ($fullOutput -match 'INSTALLATION PLAN - 40 ITEMS') `
+Assert-True ($run.Output -match 'INSTALLATION PLAN - 40 ITEMS') `
     'Full alias does not select the Recommended stack.'
-Assert-True ($fullOutput -match 'DirectPlay') 'Full profile is missing DirectPlay.'
-Assert-True ($fullOutput -match 'NVIDIA PhysX Legacy') 'Full profile is missing legacy PhysX.'
+Assert-True ($run.Log -match 'DirectPlay') 'Full profile is missing DirectPlay.'
+Assert-True ($run.Log -match 'NVIDIA PhysX Legacy') 'Full profile is missing legacy PhysX.'
 
 Write-Host 'Checking custom component selection...'
-$customOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File $installer -Profile Custom -IncludeGroup VC++,DotNet,AspNet `
-    -DryRun -Unattended -NoColor 2>&1 | Out-String
-Assert-True ($LASTEXITCODE -eq 0) "Custom dry run failed: $customOutput"
-Assert-True ($customOutput -match 'INSTALLATION PLAN - 30 ITEMS') `
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Custom', '-IncludeGroup', 'VC++,DotNet,AspNet')
+Assert-True ($run.ExitCode -eq 0) "Custom dry run failed: $($run.Output)"
+Assert-True ($run.Output -match 'INSTALLATION PLAN - 30 ITEMS') `
     'Custom VC++/.NET/ASP.NET selection count changed.'
-Assert-True ($customOutput -notmatch 'DirectX End-User Runtime') `
+Assert-True ($run.Log -notmatch 'DirectX End-User Runtime') `
     'Custom runtime-only selection unexpectedly includes gaming extras.'
 
-$workbenchOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File $installer -Profile Custom -IncludeGroup Workbench `
-    -DryRun -Unattended -NoColor 2>&1 | Out-String
-Assert-True ($LASTEXITCODE -eq 0) "Workbench dry run failed: $workbenchOutput"
-Assert-True ($workbenchOutput -match 'INSTALLATION PLAN - 7 ITEMS') `
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Custom', '-IncludeGroup', 'Workbench')
+Assert-True ($run.ExitCode -eq 0) "Workbench dry run failed: $($run.Output)"
+Assert-True ($run.Output -match 'INSTALLATION PLAN - 7 ITEMS') `
     'Optional Workbench selection count changed.'
-Assert-True ($workbenchOutput -match 'Xtreme Download Manager') `
+Assert-True ($run.Log -match 'Xtreme Download Manager') `
     'Microsoft Store XDM is missing from the Workbench.'
-Assert-True ($workbenchOutput -notmatch 'Amazon Corretto 25 JDK') `
+Assert-True ($run.Log -notmatch 'Amazon Corretto 25 JDK') `
     'Workbench unexpectedly pulls in the recommended prerequisite stack.'
 
 Write-Host 'Checking selectable Corretto versions and legacy .NET feature...'
-$javaOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File $installer -Profile Custom -IncludeGroup Java -DryRun -Unattended -NoColor 2>&1 |
-    Out-String
-Assert-True ($LASTEXITCODE -eq 0) "Java dry run failed: $javaOutput"
-Assert-True ($javaOutput -match 'INSTALLATION PLAN - 4 ITEMS') `
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Custom', '-IncludeGroup', 'Java')
+Assert-True ($run.ExitCode -eq 0) "Java dry run failed: $($run.Output)"
+Assert-True ($run.Output -match 'INSTALLATION PLAN - 4 ITEMS') `
     'Java component does not select the four Corretto JDK lines.'
-Assert-True ($javaOutput -match 'Amazon Corretto 21 JDK') 'Corretto 21 is not selectable.'
-Assert-True ($javaOutput -match 'Amazon Corretto 17 JDK') 'Corretto 17 is not selectable.'
-Assert-True ($javaOutput -match 'Amazon Corretto 8 JDK') 'Corretto 8 is not selectable.'
+Assert-True ($run.Log -match 'Amazon Corretto 21 JDK') 'Corretto 21 is not selectable.'
+Assert-True ($run.Log -match 'Amazon Corretto 17 JDK') 'Corretto 17 is not selectable.'
+Assert-True ($run.Log -match 'Amazon Corretto 8 JDK') 'Corretto 8 is not selectable.'
 
-$legacyOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
-    -File $installer -Profile Custom -IncludeGroup Legacy -DryRun -Unattended -NoColor 2>&1 |
-    Out-String
-Assert-True ($LASTEXITCODE -eq 0) "Legacy-feature dry run failed: $legacyOutput"
-Assert-True ($legacyOutput -match 'INSTALLATION PLAN - 1 ITEMS') `
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Custom', '-IncludePackage', 'Amazon.Corretto.21.JDK')
+Assert-True ($run.Output -match 'INSTALLATION PLAN - 1 ITEMS') 'A single Corretto version is not selectable.'
+
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Custom', '-IncludeGroup', 'Legacy')
+Assert-True ($run.ExitCode -eq 0) "Legacy-feature dry run failed: $($run.Output)"
+Assert-True ($run.Output -match 'INSTALLATION PLAN - 1 ITEMS') `
     '.NET Framework 3.5 should be an independently selectable item.'
-Assert-True ($legacyOutput -match '\.NET Framework 3\.5') `
+Assert-True ($run.Log -match '\.NET Framework 3\.5') `
     '.NET Framework 3.5 is missing from the legacy component plan.'
+
+Write-Host 'Checking the interactive menu fallback for redirected input...'
+$menuOutput = "3`n`n" | & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -File $installer -DryRun -NoColor 2>&1 | Out-String
+Assert-True ($LASTEXITCODE -eq 0) "Menu fallback failed: $menuOutput"
+Assert-True ($menuOutput -match 'INSTALLATION PLAN - 7 ITEMS') 'Workbench menu entry did not select the Workbench.'
+
+$run = Invoke-AegisDryRun -Arguments @('-Profile', 'Custom', '-IncludeGroup', 'Nope')
+Assert-True ($run.ExitCode -eq 1) 'Unknown component did not produce fatal exit code 1.'
+Assert-True ($run.Output -match 'Valid components:') 'Unknown-component error does not list valid names.'
 
 Write-Host 'Checking invalid package failure semantics...'
 $invalidOutput = & $enginePath -NoLogo -NoProfile -ExecutionPolicy Bypass `
